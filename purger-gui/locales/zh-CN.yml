@@ -1,0 +1,80 @@
+# 中文翻译文件
+_version: 1
+
+# 应用程序
+app:
+  title: "Rust Project Purger"
+  
+# 菜单栏
+menu:
+  file: "文件"
+  settings: "设置"
+  help: "帮助"
+  select_folder: "选择文件夹..."
+  exit: "退出"
+  preferences: "首选项..."
+  about: "关于..."
+
+# 扫描面板
+scan:
+  path_label: "扫描路径:"
+  max_depth_label: "最大深度:"
+  strategy_label: "清理策略:"
+  recent_paths_label: "最近路径:"
+  recent_paths_placeholder: "选择最近路径..."
+  start_button: "开始扫描"
+  scanning_status: "正在扫描..."
+  strategy_cargo_clean: "Cargo Clean (推荐)"
+  strategy_direct_delete: "直接删除"
+
+# 项目列表
+projects:
+  empty_message: "点击扫描按钮开始查找Rust项目"
+  found_message: "找到 %{count} 个Rust项目"
+  selected_message: "已选中: %{count} 个项目"
+  cleanable_size: "可清理: %{size}"
+  clean_button: "清理选中项目"
+  select_all: "全选"
+  select_none: "全不选"
+  invert_selection: "反选"
+
+# 进度显示
+progress:
+  scan_label: "扫描进度:"
+  clean_label: "清理进度:"
+  current_project: "当前项目:"
+  freed_size: "已释放:"
+  last_result: "上次清理结果:"
+  cleaned_projects: "成功清理: %{count} 个项目"
+  freed_space: "释放空间: %{size}"
+  duration: "耗时: %{ms}ms"
+  failed_projects: "失败项目: %{count} 个"
+
+# 对话框
+dialog:
+  settings_title: "设置"
+  about_title: "关于"
+  max_recent_paths: "最大最近路径数:"
+  auto_save_settings: "自动保存设置"
+  clear_recent_paths: "清除最近路径"
+  reset_defaults: "重置为默认"
+  ok: "确定"
+  cancel: "取消"
+  
+# 关于对话框
+about:
+  version: "版本 0.1.0"
+  description1: "一个用于清理Rust项目构建目录的工具"
+  description2: "支持批量扫描和选择性清理"
+  footer: "使用egui构建 • 开源软件"
+
+# 清理策略
+strategy:
+  cargo_clean: "Cargo Clean"
+  direct_delete: "直接删除"
+
+# 语言设置
+language:
+  label: "语言:"
+  chinese: "中文"
+  english: "English"

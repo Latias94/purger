@@ -1,0 +1,80 @@
+# English translation file
+_version: 1
+
+# Application
+app:
+  title: "Rust Project Purger"
+  
+# Menu bar
+menu:
+  file: "File"
+  settings: "Settings"
+  help: "Help"
+  select_folder: "Select Folder..."
+  exit: "Exit"
+  preferences: "Preferences..."
+  about: "About..."
+
+# Scan panel
+scan:
+  path_label: "Scan Path:"
+  max_depth_label: "Max Depth:"
+  strategy_label: "Clean Strategy:"
+  recent_paths_label: "Recent Paths:"
+  recent_paths_placeholder: "Select recent path..."
+  start_button: "Start Scan"
+  scanning_status: "Scanning..."
+  strategy_cargo_clean: "Cargo Clean (Recommended)"
+  strategy_direct_delete: "Direct Delete"
+
+# Project list
+projects:
+  empty_message: "Click scan button to start finding Rust projects"
+  found_message: "Found %{count} Rust projects"
+  selected_message: "Selected: %{count} projects"
+  cleanable_size: "Cleanable: %{size}"
+  clean_button: "Clean Selected Projects"
+  select_all: "Select All"
+  select_none: "Select None"
+  invert_selection: "Invert Selection"
+
+# Progress display
+progress:
+  scan_label: "Scan Progress:"
+  clean_label: "Clean Progress:"
+  current_project: "Current Project:"
+  freed_size: "Freed:"
+  last_result: "Last Clean Result:"
+  cleaned_projects: "Successfully cleaned: %{count} projects"
+  freed_space: "Freed space: %{size}"
+  duration: "Duration: %{ms}ms"
+  failed_projects: "Failed projects: %{count}"
+
+# Dialogs
+dialog:
+  settings_title: "Settings"
+  about_title: "About"
+  max_recent_paths: "Max Recent Paths:"
+  auto_save_settings: "Auto Save Settings"
+  clear_recent_paths: "Clear Recent Paths"
+  reset_defaults: "Reset to Defaults"
+  ok: "OK"
+  cancel: "Cancel"
+  
+# About dialog
+about:
+  version: "Version 0.1.0"
+  description1: "A tool for cleaning Rust project build directories"
+  description2: "Supports batch scanning and selective cleaning"
+  footer: "Built with egui • Open Source Software"
+
+# Clean strategy
+strategy:
+  cargo_clean: "Cargo Clean"
+  direct_delete: "Direct Delete"
+
+# Language settings
+language:
+  label: "Language:"
+  chinese: "中文"
+  english: "English"
