@@ -38,11 +38,12 @@ impl RustProject {
         let has_target = target_path.exists();
 
         let (target_size, last_modified) = if has_target {
-            let size = Self::calculate_directory_size(&target_path)?;
             let modified = fs::metadata(&target_path)
                 .context("Failed to get target directory metadata")?
                 .modified()
                 .context("Failed to get target directory modification time")?;
+            // 延迟计算大小，只在需要时计算
+            let size = Self::calculate_directory_size_fast(&target_path)?;
             (size, modified)
         } else {
             (0, SystemTime::UNIX_EPOCH)
@@ -90,6 +91,27 @@ impl RustProject {
                 }
             }
         }
+
+        Ok(total_size)
+    }
+
+    /// 快速计算目录大小（优化版本）
+    fn calculate_directory_size_fast(dir: &Path) -> Result<u64> {
+        use rayon::prelude::*;
+
+        // 使用并行遍历来加速大目录的计算
+        let entries: Vec<_> = WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .collect();
+
+        let total_size: u64 = entries
+            .par_iter()
+            .filter_map(|entry| {
+                entry.metadata().ok().map(|m| m.len())
+            })
+            .sum();
 
         Ok(total_size)
     }

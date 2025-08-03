@@ -56,6 +56,7 @@ impl ProjectScanner {
     /// 扫描指定路径下的所有Rust项目
     pub fn scan<P: AsRef<Path>>(&self, root_path: P) -> Result<Vec<RustProject>> {
         let root_path = root_path.as_ref();
+        let start_time = std::time::Instant::now();
         info!("开始扫描路径: {:?}", root_path);
 
         if !root_path.exists() {
@@ -66,6 +67,31 @@ impl ProjectScanner {
             anyhow::bail!("路径不是目录: {:?}", root_path);
         }
 
+        // 优化的文件遍历
+        let cargo_dirs = self.find_cargo_projects(root_path)?;
+        let find_time = start_time.elapsed();
+        info!("找到 {} 个Cargo.toml文件，耗时: {:?}", cargo_dirs.len(), find_time);
+
+        // 并行或串行处理项目
+        let parse_start = std::time::Instant::now();
+        let projects = if self.config.parallel {
+            self.process_projects_parallel(cargo_dirs)?
+        } else {
+            self.process_projects_sequential(cargo_dirs)?
+        };
+        let parse_time = parse_start.elapsed();
+
+        info!("成功解析 {} 个Rust项目，耗时: {:?}", projects.len(), parse_time);
+        info!("总扫描时间: {:?}", start_time.elapsed());
+
+        // 应用过滤器
+        let filtered_projects = self.apply_filters(projects);
+
+        Ok(filtered_projects)
+    }
+
+    /// 优化的Cargo项目查找方法
+    fn find_cargo_projects(&self, root_path: &Path) -> Result<Vec<PathBuf>> {
         let mut builder = WalkBuilder::new(root_path);
         builder
             .follow_links(self.config.follow_links)
@@ -76,32 +102,38 @@ impl ProjectScanner {
             builder.max_depth(Some(depth));
         }
 
-        let walker = builder.build();
-        let cargo_dirs: Vec<PathBuf> = walker
-            .filter_map(|entry| match entry {
-                Ok(entry) => self.process_entry(entry),
-                Err(e) => {
-                    warn!("扫描错误: {}", e);
-                    None
+        // 启用并行遍历以提升性能
+        if self.config.parallel {
+            // 使用系统CPU核心数，但限制最大线程数避免过度并发
+            let thread_count = std::cmp::min(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4), 8);
+            builder.threads(thread_count);
+            debug!("启用并行文件遍历，线程数: {}", thread_count);
+        }
+
+        let walker = builder.build_parallel();
+        let cargo_dirs = std::sync::Mutex::new(Vec::new());
+
+        walker.run(|| {
+            let cargo_dirs = &cargo_dirs;
+            Box::new(move |entry| {
+                match entry {
+                    Ok(entry) => {
+                        if let Some(project_dir) = self.process_entry(entry) {
+                            if let Ok(mut dirs) = cargo_dirs.lock() {
+                                dirs.push(project_dir);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("扫描错误: {}", e);
+                    }
                 }
+                ignore::WalkState::Continue
             })
-            .collect();
+        });
 
-        info!("找到 {} 个Cargo.toml文件", cargo_dirs.len());
-
-        // 并行或串行处理项目
-        let projects = if self.config.parallel {
-            self.process_projects_parallel(cargo_dirs)?
-        } else {
-            self.process_projects_sequential(cargo_dirs)?
-        };
-
-        info!("成功解析 {} 个Rust项目", projects.len());
-
-        // 应用过滤器
-        let filtered_projects = self.apply_filters(projects);
-
-        Ok(filtered_projects)
+        let cargo_dirs = cargo_dirs.into_inner().unwrap();
+        Ok(cargo_dirs)
     }
 
     /// 处理单个目录条目
