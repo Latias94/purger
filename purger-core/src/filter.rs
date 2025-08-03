@@ -223,8 +223,10 @@ mod tests {
 
     #[test]
     fn test_time_filter() {
-        let mut config = ScanConfig::default();
-        config.keep_days = Some(7); // 保留7天内的项目
+        let config = ScanConfig {
+            keep_days: Some(7), // 保留7天内的项目
+            ..Default::default()
+        };
 
         let filter = ProjectFilter::new(config);
 
@@ -240,8 +242,10 @@ mod tests {
 
     #[test]
     fn test_size_filter() {
-        let mut config = ScanConfig::default();
-        config.keep_size = Some(500); // 保留小于500字节的项目
+        let config = ScanConfig {
+            keep_size: Some(500), // 保留小于500字节的项目
+            ..Default::default()
+        };
 
         let filter = ProjectFilter::new(config);
 

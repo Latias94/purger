@@ -562,11 +562,10 @@ mod tests {
         let cargo_toml = format!(
             r#"
 [package]
-name = "{}"
+name = "{name}"
 version = "0.1.0"
 edition = "2021"
-"#,
-            name
+"#
         );
 
         fs::write(project_dir.join("Cargo.toml"), cargo_toml)?;
@@ -586,8 +585,10 @@ edition = "2021"
         let temp_dir = TempDir::new()?;
         let project = create_test_project_with_target(temp_dir.path(), "test_project")?;
 
-        let mut config = CleanConfig::default();
-        config.dry_run = true;
+        let config = CleanConfig {
+            dry_run: true,
+            ..Default::default()
+        };
 
         let cleaner = ProjectCleaner::new(config);
         let size_freed = cleaner.clean_project(&project)?;
@@ -606,8 +607,10 @@ edition = "2021"
         let temp_dir = TempDir::new()?;
         let project = create_test_project_with_target(temp_dir.path(), "test_project")?;
 
-        let mut config = CleanConfig::default();
-        config.strategy = CleanStrategy::DirectDelete;
+        let config = CleanConfig {
+            strategy: CleanStrategy::DirectDelete,
+            ..Default::default()
+        };
 
         let cleaner = ProjectCleaner::new(config);
         let size_freed = cleaner.clean_project(&project)?;
@@ -626,7 +629,7 @@ edition = "2021"
         // 这个测试可能在某些环境中失败，如果cargo不可用
         // 在实际项目中，可能需要mock这个功能
         let available = ProjectCleaner::check_cargo_available();
-        println!("Cargo available: {}", available);
+        println!("Cargo available: {available}");
     }
 
     #[test]
@@ -750,10 +753,10 @@ edition = "2021"
         let result = cleaner.clean_project(&fake_project);
 
         // 清理不存在的项目应该返回0或错误
-        match result {
-            Ok(size) => assert_eq!(size, 0),
-            Err(_) => {} // 错误也是可接受的
+        if let Ok(size) = result {
+            assert_eq!(size, 0);
         }
+        // 错误也是可接受的
 
         Ok(())
     }
@@ -787,10 +790,8 @@ edition = "2021"
         let result = cleaner.clean_project(&project);
 
         // 清理只读目录可能失败，这是预期的
-        match result {
-            Ok(_) => {}  // 如果成功了也没关系
-            Err(_) => {} // 失败是预期的
-        }
+        // 如果成功了也没关系，失败是预期的
+        let _ = result;
 
         Ok(())
     }
@@ -811,10 +812,8 @@ edition = "2021"
         let result = cleaner.clean_project(&project);
 
         // 可能会因为超时而失败，也可能成功（如果操作很快）
-        match result {
-            Ok(_) => {}  // 成功也是可能的
-            Err(_) => {} // 超时失败是预期的
-        }
+        // 成功也是可能的，超时失败是预期的
+        let _ = result;
 
         Ok(())
     }

@@ -17,14 +17,12 @@ impl ScanHandler {
         stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) {
         thread::spawn(move || {
-            let mut config = ScanConfig::default();
-            config.max_depth = max_depth;
-            config.keep_days = settings.keep_days;
-            config.ignore_paths = settings
-                .ignore_paths
-                .iter()
-                .map(|s| PathBuf::from(s))
-                .collect();
+            let mut config = ScanConfig {
+                max_depth,
+                keep_days: settings.keep_days,
+                ignore_paths: settings.ignore_paths.iter().map(PathBuf::from).collect(),
+                ..Default::default()
+            };
 
             // 转换MB为字节
             if let Some(size_mb) = settings.keep_size_mb {

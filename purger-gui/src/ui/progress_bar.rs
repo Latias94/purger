@@ -16,7 +16,7 @@ impl ProgressBar {
                 } else {
                     0.0
                 };
-                ui.add(egui::ProgressBar::new(progress).text(format!("{}/{}", current, total)));
+                ui.add(egui::ProgressBar::new(progress).text(format!("{current}/{total}")));
             });
         }
     }
@@ -32,7 +32,7 @@ impl ProgressBar {
                     } else {
                         0.0
                     };
-                    ui.add(egui::ProgressBar::new(progress).text(format!("{}/{}", current, total)));
+                    ui.add(egui::ProgressBar::new(progress).text(format!("{current}/{total}")));
                 });
 
                 if let Some(ref project_name) = data.current_cleaning_project {
@@ -90,7 +90,7 @@ impl ProgressBar {
 
         // 显示错误信息
         if let Some(ref error) = data.error_message {
-            ui.colored_label(egui::Color32::RED, format!("错误: {}", error));
+            ui.colored_label(egui::Color32::RED, format!("错误: {error}"));
         }
     }
 }

@@ -101,6 +101,7 @@ impl AppSettings {
     }
 
     /// 获取最近使用的路径
+    #[allow(dead_code)]
     pub fn get_recent_paths(&self) -> &[String] {
         &self.recent_paths
     }
@@ -160,8 +161,10 @@ mod tests {
 
     #[test]
     fn test_add_recent_path_limit() {
-        let mut settings = AppSettings::default();
-        settings.max_recent_paths = 3; // 设置最大数量为3
+        let mut settings = AppSettings {
+            max_recent_paths: 3, // 设置最大数量为3
+            ..Default::default()
+        };
 
         // 添加4个路径
         settings.add_recent_path("/path/1".to_string());
@@ -240,9 +243,11 @@ mod tests {
         let config_path = temp_dir.path().join("purger").join("settings.json");
 
         // 创建测试设置
-        let mut original_settings = AppSettings::default();
-        original_settings.last_scan_path = "/test/path".to_string();
-        original_settings.max_depth = 5;
+        let mut original_settings = AppSettings {
+            last_scan_path: "/test/path".to_string(),
+            max_depth: 5,
+            ..Default::default()
+        };
         original_settings.add_recent_path("/recent/1".to_string());
         original_settings.add_recent_path("/recent/2".to_string());
 

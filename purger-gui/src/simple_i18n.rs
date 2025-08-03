@@ -17,6 +17,7 @@ impl Language {
     }
 
     /// 获取语言代码
+    #[allow(dead_code)]
     pub fn code(&self) -> &'static str {
         match self {
             Language::Chinese => "zh-CN",
@@ -33,6 +34,7 @@ impl Language {
     }
 
     /// 从语言代码创建语言
+    #[allow(dead_code)]
     pub fn from_code(code: &str) -> Option<Language> {
         match code {
             "zh-CN" => Some(Language::Chinese),
@@ -335,7 +337,7 @@ mod tests {
     #[test]
     fn test_language_clone() {
         let lang = Language::Chinese;
-        let cloned = lang.clone();
+        let cloned = lang;
         assert_eq!(lang, cloned);
     }
 

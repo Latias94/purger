@@ -25,7 +25,7 @@ impl Dialogs {
                 ui.horizontal(|ui| {
                     ui.label(tr!("language.label"));
                     let current_lang = settings.language;
-                    egui::ComboBox::from_id_source("language_selector")
+                    egui::ComboBox::from_id_salt("language_selector")
                         .selected_text(current_lang.display_name())
                         .show_ui(ui, |ui| {
                             for lang in Language::all() {

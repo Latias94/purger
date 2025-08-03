@@ -13,11 +13,11 @@ impl MenuBar {
         on_select_folder: &mut bool,
     ) {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(tr!("menu.file"), |ui| {
                     if ui.button(tr!("menu.select_folder")).clicked() {
                         *on_select_folder = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button(tr!("menu.exit")).clicked() {
@@ -28,14 +28,14 @@ impl MenuBar {
                 ui.menu_button(tr!("menu.settings"), |ui| {
                     if ui.button(tr!("menu.preferences")).clicked() {
                         *show_settings = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
                 ui.menu_button(tr!("menu.help"), |ui| {
                     if ui.button(tr!("menu.about")).clicked() {
                         *show_about = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             });

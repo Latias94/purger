@@ -213,11 +213,10 @@ mod tests {
         let cargo_toml = format!(
             r#"
 [package]
-name = "{}"
+name = "{name}"
 version = "0.1.0"
 edition = "2021"
-"#,
-            name
+"#
         );
 
         fs::write(project_dir.join("Cargo.toml"), cargo_toml)?;
@@ -289,7 +288,7 @@ edition = "2021"
         let scanner = ProjectScanner::new(config);
         let projects = scanner.scan(root)?;
         println!("无深度限制找到 {} 个项目", projects.len());
-        assert!(projects.len() >= 1);
+        assert!(!projects.is_empty());
 
         // 限制深度为2，应该找到浅层项目（在子目录中）
         let config = ScanConfig {
@@ -329,18 +328,22 @@ edition = "2021"
 
         // 创建多个项目
         for i in 0..5 {
-            create_test_project(root, &format!("project_{}", i), i % 2 == 0)?;
+            create_test_project(root, &format!("project_{i}"), i % 2 == 0)?;
         }
 
         // 并行扫描
-        let mut config = ScanConfig::default();
-        config.parallel = true;
+        let config = ScanConfig {
+            parallel: true,
+            ..Default::default()
+        };
         let scanner = ProjectScanner::new(config);
         let parallel_projects = scanner.scan(root)?;
 
         // 串行扫描
-        let mut config = ScanConfig::default();
-        config.parallel = false;
+        let config = ScanConfig {
+            parallel: false,
+            ..Default::default()
+        };
         let scanner = ProjectScanner::new(config);
         let sequential_projects = scanner.scan(root)?;
 
@@ -441,10 +444,10 @@ edition = "2021"
         {
             let result = scanner.scan(std::path::Path::new("C:\\System Volume Information"));
             // 这应该失败或返回空结果
-            match result {
-                Ok(projects) => assert!(projects.is_empty()),
-                Err(_) => {} // 权限错误是预期的
+            if let Ok(projects) = result {
+                assert!(projects.is_empty());
             }
+            // 权限错误是预期的
         }
 
         // 在Unix系统上测试
@@ -500,7 +503,7 @@ edition = "2021"
 
         // 创建一个深的目录结构（但不要太深，避免超过默认深度限制）
         for i in 0..5 {
-            current_path = current_path.join(format!("level_{}", i));
+            current_path = current_path.join(format!("level_{i}"));
             std::fs::create_dir_all(&current_path)?;
         }
 

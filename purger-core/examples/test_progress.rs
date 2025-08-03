@@ -23,7 +23,7 @@ path = "src/main.rs"
     fs::write(project_dir.join("Cargo.toml"), cargo_toml)?;
 
     // 创建 src 目录和 main.rs
-    fs::create_dir_all(&project_dir.join("src"))?;
+    fs::create_dir_all(project_dir.join("src"))?;
     fs::write(
         project_dir.join("src").join("main.rs"),
         "fn main() { println!(\"Hello, world!\"); }",
@@ -31,7 +31,7 @@ path = "src/main.rs"
 
     // 创建 target 目录和一些文件
     let target_dir = project_dir.join("target");
-    fs::create_dir_all(&target_dir.join("debug"))?;
+    fs::create_dir_all(target_dir.join("debug"))?;
     fs::write(target_dir.join("debug").join("test.exe"), "fake executable")?;
     fs::write(target_dir.join("CACHEDIR.TAG"), "cache tag")?;
 
@@ -60,7 +60,7 @@ path = "src/main.rs"
         );
 
         if let Some(file) = &progress.current_file {
-            println!("  当前文件: {}", file);
+            println!("  当前文件: {file}");
         }
 
         progress_log_clone.lock().unwrap().push(progress);
@@ -68,10 +68,10 @@ path = "src/main.rs"
 
     match result {
         Ok(size_freed) => {
-            println!("\n清理成功! 释放空间: {} bytes", size_freed);
+            println!("\n清理成功! 释放空间: {size_freed} bytes");
         }
         Err(e) => {
-            println!("\n清理失败: {}", e);
+            println!("\n清理失败: {e}");
         }
     }
 

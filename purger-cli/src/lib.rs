@@ -573,7 +573,7 @@ mod tests {
         use purger_core::RustProject;
         use std::time::SystemTime;
 
-        let projects = vec![
+        let projects = [
             RustProject {
                 path: PathBuf::from("/test1"),
                 name: "test1".to_string(),

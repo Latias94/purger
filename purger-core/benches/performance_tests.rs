@@ -1,10 +1,11 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use purger_core::{
     ProjectCleaner, ProjectScanner,
     cleaner::{CleanConfig, CleanStrategy},
     scanner::ScanConfig,
 };
 use std::fs;
+use std::hint::black_box;
 use tempfile::TempDir;
 
 /// 创建一个测试用的Rust项目

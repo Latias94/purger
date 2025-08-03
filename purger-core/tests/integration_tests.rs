@@ -127,7 +127,7 @@ fn test_scan_with_filters() -> Result<()> {
 
     // 应该找到两个项目
     assert!(
-        projects.len() >= 1,
+        !projects.is_empty(),
         "Should find at least one project, found: {}",
         projects.len()
     );

@@ -66,6 +66,7 @@ impl PurgerApp {
     }
 
     /// 获取设置的引用
+    #[allow(dead_code)]
     pub fn settings(&self) -> &AppSettings {
         &self.settings
     }
@@ -92,7 +93,7 @@ impl PurgerApp {
                 AppMessage::ScanError(error) => {
                     self.state = AppState::Idle;
                     self.data.scan_progress = None;
-                    self.data.error_message = Some(format!("扫描失败: {}", error));
+                    self.data.error_message = Some(format!("扫描失败: {error}"));
                     self.stop_requested
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -136,7 +137,7 @@ impl PurgerApp {
                     self.state = AppState::Idle;
                     self.data.clean_progress = None;
                     self.data.current_cleaning_project = None;
-                    self.data.error_message = Some(format!("清理失败: {}", error));
+                    self.data.error_message = Some(format!("清理失败: {error}"));
                     self.stop_requested
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -183,14 +184,16 @@ impl PurgerApp {
         self.stop_requested
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
-        let mut config = CleanConfig::default();
-        config.strategy = self.settings.clean_strategy;
-        config.keep_executable = self.settings.keep_executable;
-        config.executable_backup_dir = self
-            .settings
-            .executable_backup_dir
-            .as_ref()
-            .map(|s| std::path::PathBuf::from(s));
+        let config = CleanConfig {
+            strategy: self.settings.clean_strategy,
+            keep_executable: self.settings.keep_executable,
+            executable_backup_dir: self
+                .settings
+                .executable_backup_dir
+                .as_ref()
+                .map(std::path::PathBuf::from),
+            ..Default::default()
+        };
 
         CleanHandler::start_clean(
             selected_projects,

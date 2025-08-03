@@ -34,7 +34,7 @@ impl ScanPanel {
                     ui.separator();
 
                     ui.label(tr!("scan.strategy_label"));
-                    egui::ComboBox::from_id_source("clean_strategy")
+                    egui::ComboBox::from_id_salt("clean_strategy")
                         .selected_text(match settings.clean_strategy {
                             purger_core::CleanStrategy::CargoClean => tr!("strategy.cargo_clean"),
                             purger_core::CleanStrategy::DirectDelete => {
@@ -136,7 +136,7 @@ impl ScanPanel {
                 if !settings.recent_paths.is_empty() {
                     ui.horizontal(|ui| {
                         ui.label(tr!("scan.recent_paths_label"));
-                        egui::ComboBox::from_id_source("recent_paths")
+                        egui::ComboBox::from_id_salt("recent_paths")
                             .selected_text(tr!("scan.recent_paths_placeholder"))
                             .show_ui(ui, |ui| {
                                 for path in &settings.recent_paths {

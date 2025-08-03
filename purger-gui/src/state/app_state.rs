@@ -100,11 +100,13 @@ impl AppData {
     }
 
     /// 清除错误消息
+    #[allow(dead_code)]
     pub fn clear_error(&mut self) {
         self.error_message = None;
     }
 
     /// 重置进度状态
+    #[allow(dead_code)]
     pub fn reset_progress(&mut self) {
         self.scan_progress = None;
         self.clean_progress = None;
@@ -119,7 +121,7 @@ mod tests {
 
     fn create_test_project(name: &str, target_size: u64, has_target: bool) -> RustProject {
         RustProject {
-            path: std::path::PathBuf::from(format!("/test/{}", name)),
+            path: std::path::PathBuf::from(format!("/test/{name}")),
             name: name.to_string(),
             target_size,
             last_modified: SystemTime::now(),
@@ -336,7 +338,7 @@ mod tests {
         let _msg3 = AppMessage::CleanProgress(3, 8, 1024);
 
         // 测试Debug trait
-        let debug_str = format!("{:?}", msg1);
+        let debug_str = format!("{msg1:?}");
         assert!(debug_str.contains("ScanProgress"));
         assert!(debug_str.contains("5"));
         assert!(debug_str.contains("10"));
