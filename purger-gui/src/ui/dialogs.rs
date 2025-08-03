@@ -1,4 +1,4 @@
-use crate::simple_i18n::{set_language, Language};
+use crate::simple_i18n::{Language, set_language};
 use crate::state::AppSettings;
 use crate::tr;
 use eframe::egui;

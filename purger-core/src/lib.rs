@@ -19,6 +19,12 @@ pub struct CleanResult {
     pub duration_ms: u64,
 }
 
+impl Default for CleanResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CleanResult {
     pub fn new() -> Self {
         Self {

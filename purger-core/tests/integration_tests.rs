@@ -3,9 +3,9 @@ use std::fs;
 use tempfile::TempDir;
 
 use purger_core::{
+    ProjectCleaner, ProjectScanner,
     cleaner::{CleanConfig, CleanStrategy},
     scanner::ScanConfig,
-    ProjectCleaner, ProjectScanner,
 };
 
 /// 创建一个测试用的Rust项目

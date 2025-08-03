@@ -43,12 +43,12 @@ toml.workspace = true
 # GUI dependencies (optional)
 eframe = { workspace = true, optional = true }
 egui = { workspace = true, optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
-rfd = { version = "0.15", optional = true }
-dirs = { version = "6.0", optional = true }
-rust-i18n = { version = "3.1", optional = true }
-sys-locale = { version = "0.3", optional = true }
+rfd = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
+rust-i18n = { workspace = true, optional = true }
+sys-locale = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -63,21 +63,22 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+edition = "2024"
+authors = ["Mingzhen Zhuang <superfrankie621@gmail.com>"]
+description = "A tool for cleaning Rust project build directories"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/purger"
-homepage = "https://github.com/yourusername/purger"
+repository = "https://github.com/Latias94/purger"
+homepage = "https://github.com/Latias94/purger"
 documentation = "https://docs.rs/purger"
 readme = "README.md"
 keywords = ["rust", "cargo", "clean", "build", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-# 共享依赖
 anyhow = "1.0"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 toml = "0.9"
 walkdir = "2.4"
 ignore = "0.4"
@@ -89,3 +90,35 @@ egui = "0.32"
 tokio = { version = "1.0", features = ["full"] }
 rayon = "1.8"
 tempfile = "3.8"
+# GUI-specific dependencies
+rfd = "0.15"
+dirs = "6.0"
+rust-i18n = "3.1"
+sys-locale = "0.3"
+# Development dependencies
+criterion = { version = "0.7", features = ["html_reports"] }
+
+# The profile that 'cargo dist build' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# cargo-dist configuration
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.28.5"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc"
+]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
+# Allow dirty working directories
+allow-dirty = ["ci"]

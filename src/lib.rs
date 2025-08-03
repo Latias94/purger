@@ -52,6 +52,6 @@ pub use purger_core::*;
 
 // Re-export commonly used types
 pub use purger_core::{
-    cleaner::CleanConfig, scanner::ScanConfig, CleanPhase, CleanProgress, CleanResult,
-    CleanStrategy, ProjectCleaner, ProjectScanner, RustProject,
+    CleanPhase, CleanProgress, CleanResult, CleanStrategy, ProjectCleaner, ProjectScanner,
+    RustProject, cleaner::CleanConfig, scanner::ScanConfig,
 };

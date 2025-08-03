@@ -1,5 +1,5 @@
 use crate::state::AppMessage;
-use purger_core::{cleaner::CleanConfig, CleanResult, ProjectCleaner, RustProject};
+use purger_core::{CleanResult, ProjectCleaner, RustProject, cleaner::CleanConfig};
 use std::sync::mpsc;
 use std::thread;
 

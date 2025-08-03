@@ -1,4 +1,4 @@
-use purger_core::{cleaner::CleanConfig, CleanProgress, ProjectCleaner};
+use purger_core::{CleanProgress, ProjectCleaner, cleaner::CleanConfig};
 use std::fs;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;

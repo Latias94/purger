@@ -45,7 +45,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     // 添加Noto Sans中文字体
     fonts.font_data.insert(
         "noto_sans_sc".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/NotoSansSC-Regular.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/NotoSansSC-Regular.ttf")).into(),
     );
 
     // 将中文字体添加到字体族中，优先级高于默认字体

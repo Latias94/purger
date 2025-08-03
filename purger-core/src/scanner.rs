@@ -53,11 +53,6 @@ impl ProjectScanner {
         Self { config }
     }
 
-    /// 使用默认配置创建扫描器
-    pub fn default() -> Self {
-        Self::new(ScanConfig::default())
-    }
-
     /// 扫描指定路径下的所有Rust项目
     pub fn scan<P: AsRef<Path>>(&self, root_path: P) -> Result<Vec<RustProject>> {
         let root_path = root_path.as_ref();
@@ -195,6 +190,12 @@ impl ProjectScanner {
 
         let filter = ProjectFilter::new(self.config.clone());
         filter.filter_projects(projects)
+    }
+}
+
+impl Default for ProjectScanner {
+    fn default() -> Self {
+        Self::new(ScanConfig::default())
     }
 }
 

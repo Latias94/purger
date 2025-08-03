@@ -1,5 +1,5 @@
 use crate::state::{AppMessage, AppSettings};
-use purger_core::{scanner::ScanConfig, ProjectScanner};
+use purger_core::{ProjectScanner, scanner::ScanConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;

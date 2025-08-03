@@ -5,22 +5,17 @@ use std::process::Command;
 use std::time::Instant;
 use tracing::{debug, error, info};
 
-use crate::project::RustProject;
 use crate::CleanResult;
+use crate::project::RustProject;
 
 /// 清理策略
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum CleanStrategy {
     /// 使用cargo clean命令
+    #[default]
     CargoClean,
     /// 直接删除target目录
     DirectDelete,
-}
-
-impl Default for CleanStrategy {
-    fn default() -> Self {
-        CleanStrategy::CargoClean
-    }
 }
 
 /// 清理进度信息
@@ -82,11 +77,6 @@ impl ProjectCleaner {
     /// 创建新的清理器
     pub fn new(config: CleanConfig) -> Self {
         Self { config }
-    }
-
-    /// 使用默认配置创建清理器
-    pub fn default() -> Self {
-        Self::new(CleanConfig::default())
     }
 
     /// 清理单个项目
@@ -414,9 +404,8 @@ impl ProjectCleaner {
                 phase: CleanPhase::Cleaning,
             });
 
-            std::fs::copy(exe_path, &backup_path).with_context(|| {
-                format!("备份可执行文件失败: {:?} -> {:?}", exe_path, backup_path)
-            })?;
+            std::fs::copy(exe_path, &backup_path)
+                .with_context(|| format!("备份可执行文件失败: {exe_path:?} -> {backup_path:?}"))?;
 
             debug!("备份可执行文件: {:?} -> {:?}", exe_path, backup_path);
         }
@@ -494,7 +483,7 @@ impl ProjectCleaner {
         // 在Windows上检查.exe扩展名
         #[cfg(target_os = "windows")]
         {
-            path.extension().map_or(false, |ext| ext == "exe")
+            path.extension().is_some_and(|ext| ext == "exe")
         }
 
         // 在Unix系统上检查可执行权限
@@ -550,6 +539,12 @@ impl ProjectCleaner {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+    }
+}
+
+impl Default for ProjectCleaner {
+    fn default() -> Self {
+        Self::new(CleanConfig::default())
     }
 }
 

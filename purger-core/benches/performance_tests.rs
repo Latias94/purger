@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use purger_core::{
+    ProjectCleaner, ProjectScanner,
     cleaner::{CleanConfig, CleanStrategy},
     scanner::ScanConfig,
-    ProjectCleaner, ProjectScanner,
 };
 use std::fs;
 use tempfile::TempDir;

@@ -2,12 +2,60 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::io::{self, Write};
 use std::path::PathBuf;
-// use tracing::info; // 暂时不需要
 
 use purger_core::{
-    cleaner::CleanConfig, scanner::ScanConfig, CleanStrategy, ProjectCleaner, ProjectFilter,
-    ProjectScanner,
+    CleanStrategy, ProjectCleaner, ProjectFilter, ProjectScanner, cleaner::CleanConfig,
+    scanner::ScanConfig,
 };
+
+/// 扫描命令的参数配置
+#[derive(Debug)]
+struct ScanCommandArgs {
+    path: PathBuf,
+    max_depth: Option<usize>,
+    target_only: bool,
+    sort_by_size: bool,
+    keep_days: Option<u32>,
+    keep_size: Option<String>,
+    ignore_paths: Vec<PathBuf>,
+    no_parallel: bool,
+    follow_symlinks: bool,
+    include_hidden: bool,
+    no_gitignore: bool,
+}
+
+/// 清理命令的参数配置
+#[derive(Debug)]
+struct CleanCommandArgs {
+    path: PathBuf,
+    max_depth: Option<usize>,
+    strategy: CleanStrategyArg,
+    dry_run: bool,
+    keep_days: Option<u32>,
+    keep_size: Option<String>,
+    ignore_paths: Vec<PathBuf>,
+    no_parallel: bool,
+    follow_symlinks: bool,
+    include_hidden: bool,
+    no_gitignore: bool,
+    yes: bool,
+    keep_executable: bool,
+    executable_backup_dir: Option<PathBuf>,
+    timeout: u64,
+}
+
+/// 扫描配置创建参数
+#[derive(Debug)]
+struct ScanConfigArgs {
+    max_depth: Option<usize>,
+    keep_days: Option<u32>,
+    keep_size: Option<String>,
+    ignore_paths: Vec<PathBuf>,
+    no_parallel: bool,
+    follow_symlinks: bool,
+    include_hidden: bool,
+    no_gitignore: bool,
+}
 
 #[derive(Parser)]
 #[command(name = "purger")]
@@ -138,7 +186,7 @@ pub enum Commands {
     },
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Debug, Clone, ValueEnum)]
 pub enum CleanStrategyArg {
     /// Use cargo clean command
     #[value(name = "cargo-clean")]
@@ -170,7 +218,7 @@ pub fn run_cli() -> Result<()> {
     };
 
     tracing_subscriber::fmt()
-        .with_env_filter(format!("purger={}", log_level))
+        .with_env_filter(format!("purger={log_level}"))
         .init();
 
     match cli.command {
@@ -186,7 +234,7 @@ pub fn run_cli() -> Result<()> {
             follow_symlinks,
             include_hidden,
             no_gitignore,
-        } => handle_scan_command(
+        } => handle_scan_command(ScanCommandArgs {
             path,
             max_depth,
             target_only,
@@ -198,7 +246,7 @@ pub fn run_cli() -> Result<()> {
             follow_symlinks,
             include_hidden,
             no_gitignore,
-        ),
+        }),
         Commands::Clean {
             path,
             max_depth,
@@ -215,7 +263,7 @@ pub fn run_cli() -> Result<()> {
             keep_executable,
             executable_backup_dir,
             timeout,
-        } => handle_clean_command(
+        } => handle_clean_command(CleanCommandArgs {
             path,
             max_depth,
             strategy,
@@ -231,42 +279,30 @@ pub fn run_cli() -> Result<()> {
             keep_executable,
             executable_backup_dir,
             timeout,
-        ),
+        }),
     }
 }
 
-fn handle_scan_command(
-    path: PathBuf,
-    max_depth: Option<usize>,
-    target_only: bool,
-    sort_by_size: bool,
-    keep_days: Option<u32>,
-    keep_size: Option<String>,
-    ignore_paths: Vec<PathBuf>,
-    no_parallel: bool,
-    follow_symlinks: bool,
-    include_hidden: bool,
-    no_gitignore: bool,
-) -> Result<()> {
-    let config = create_scan_config(
-        max_depth,
-        keep_days,
-        keep_size,
-        ignore_paths,
-        no_parallel,
-        follow_symlinks,
-        include_hidden,
-        no_gitignore,
-    )?;
+fn handle_scan_command(args: ScanCommandArgs) -> Result<()> {
+    let config = create_scan_config(ScanConfigArgs {
+        max_depth: args.max_depth,
+        keep_days: args.keep_days,
+        keep_size: args.keep_size,
+        ignore_paths: args.ignore_paths,
+        no_parallel: args.no_parallel,
+        follow_symlinks: args.follow_symlinks,
+        include_hidden: args.include_hidden,
+        no_gitignore: args.no_gitignore,
+    })?;
 
     let scanner = ProjectScanner::new(config.clone());
-    let mut projects = scanner.scan(&path)?;
+    let mut projects = scanner.scan(&args.path)?;
 
-    if target_only {
+    if args.target_only {
         projects = ProjectScanner::filter_with_target(projects);
     }
 
-    if sort_by_size {
+    if args.sort_by_size {
         projects = ProjectScanner::sort_by_size(projects);
     }
 
@@ -276,40 +312,24 @@ fn handle_scan_command(
         projects = filter.filter_projects(projects);
     }
 
-    display_projects(&projects, &path)?;
+    display_projects(&projects, &args.path)?;
     Ok(())
 }
 
-fn handle_clean_command(
-    path: PathBuf,
-    max_depth: Option<usize>,
-    strategy: CleanStrategyArg,
-    dry_run: bool,
-    keep_days: Option<u32>,
-    keep_size: Option<String>,
-    ignore_paths: Vec<PathBuf>,
-    no_parallel: bool,
-    follow_symlinks: bool,
-    include_hidden: bool,
-    no_gitignore: bool,
-    yes: bool,
-    keep_executable: bool,
-    executable_backup_dir: Option<PathBuf>,
-    timeout: u64,
-) -> Result<()> {
-    let scan_config = create_scan_config(
-        max_depth,
-        keep_days,
-        keep_size.clone(),
-        ignore_paths,
-        no_parallel,
-        follow_symlinks,
-        include_hidden,
-        no_gitignore,
-    )?;
+fn handle_clean_command(args: CleanCommandArgs) -> Result<()> {
+    let scan_config = create_scan_config(ScanConfigArgs {
+        max_depth: args.max_depth,
+        keep_days: args.keep_days,
+        keep_size: args.keep_size.clone(),
+        ignore_paths: args.ignore_paths,
+        no_parallel: args.no_parallel,
+        follow_symlinks: args.follow_symlinks,
+        include_hidden: args.include_hidden,
+        no_gitignore: args.no_gitignore,
+    })?;
 
     let scanner = ProjectScanner::new(scan_config.clone());
-    let mut projects = scanner.scan(&path)?;
+    let mut projects = scanner.scan(&args.path)?;
 
     // 只保留有target目录的项目
     projects = ProjectScanner::filter_with_target(projects);
@@ -330,24 +350,22 @@ fn handle_clean_command(
 
     // 显示将要清理的项目
     println!("Found {} projects to clean:", projects.len());
-    display_projects(&projects, &path)?;
+    display_projects(&projects, &args.path)?;
 
     // 确认清理
-    if !yes && !dry_run {
-        if !confirm_clean(&projects)? {
-            println!("Cleaning cancelled.");
-            return Ok(());
-        }
+    if !args.yes && !args.dry_run && !confirm_clean(&projects)? {
+        println!("Cleaning cancelled.");
+        return Ok(());
     }
 
     // 执行清理
     let clean_config = CleanConfig {
-        strategy: strategy.into(),
-        dry_run,
-        parallel: !no_parallel,
-        timeout_seconds: timeout,
-        keep_executable,
-        executable_backup_dir,
+        strategy: args.strategy.into(),
+        dry_run: args.dry_run,
+        parallel: !args.no_parallel,
+        timeout_seconds: args.timeout,
+        keep_executable: args.keep_executable,
+        executable_backup_dir: args.executable_backup_dir,
     };
 
     let cleaner = ProjectCleaner::new(clean_config);
@@ -359,31 +377,22 @@ fn handle_clean_command(
     Ok(())
 }
 
-fn create_scan_config(
-    max_depth: Option<usize>,
-    keep_days: Option<u32>,
-    keep_size: Option<String>,
-    ignore_paths: Vec<PathBuf>,
-    no_parallel: bool,
-    follow_symlinks: bool,
-    include_hidden: bool,
-    no_gitignore: bool,
-) -> Result<ScanConfig> {
-    let keep_size_bytes = if let Some(size_str) = keep_size {
+fn create_scan_config(args: ScanConfigArgs) -> Result<ScanConfig> {
+    let keep_size_bytes = if let Some(size_str) = args.keep_size {
         Some(purger_core::ProjectFilter::parse_size_string(&size_str)?)
     } else {
         None
     };
 
     Ok(ScanConfig {
-        max_depth,
-        parallel: !no_parallel,
-        follow_links: follow_symlinks,
-        ignore_hidden: !include_hidden,
-        respect_gitignore: !no_gitignore,
-        keep_days,
+        max_depth: args.max_depth,
+        parallel: !args.no_parallel,
+        follow_links: args.follow_symlinks,
+        ignore_hidden: !args.include_hidden,
+        respect_gitignore: !args.no_gitignore,
+        keep_days: args.keep_days,
         keep_size: keep_size_bytes,
-        ignore_paths,
+        ignore_paths: args.ignore_paths,
     })
 }
 
@@ -446,7 +455,7 @@ fn display_clean_result(result: &purger_core::CleanResult) {
             result.failed_projects.len()
         );
         for project in &result.failed_projects {
-            println!("  - {}", project);
+            println!("  - {project}");
         }
     }
 }
@@ -517,16 +526,16 @@ mod tests {
 
     #[test]
     fn test_create_scan_config() {
-        let config = create_scan_config(
-            Some(5),
-            Some(7),
-            Some("1MB".to_string()),
-            vec![PathBuf::from("/ignore")],
-            false,
-            true,
-            false,
-            true,
-        )
+        let config = create_scan_config(ScanConfigArgs {
+            max_depth: Some(5),
+            keep_days: Some(7),
+            keep_size: Some("1MB".to_string()),
+            ignore_paths: vec![PathBuf::from("/ignore")],
+            no_parallel: false,
+            follow_symlinks: true,
+            include_hidden: false,
+            no_gitignore: true,
+        })
         .unwrap();
 
         assert_eq!(config.max_depth, Some(5));

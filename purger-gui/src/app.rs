@@ -1,10 +1,10 @@
 use eframe::egui;
-use purger_core::{cleaner::CleanConfig, CleanPhase};
+use purger_core::{CleanPhase, cleaner::CleanConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::handlers::{CleanHandler, ScanHandler};
-use crate::simple_i18n::{detect_system_language, set_language, Language};
+use crate::simple_i18n::{Language, detect_system_language, set_language};
 use crate::state::{AppData, AppMessage, AppSettings, AppState};
 use crate::ui::{Dialogs, MenuBar, ProgressBar, ProjectList, ScanPanel};
 

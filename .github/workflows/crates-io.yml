@@ -1,0 +1,23 @@
+name: Publish to crates.io
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Publish to crates.io
+        run: |
+          # Publish in dependency order
+          cd purger-core && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          sleep 30
+          cd ../purger-cli && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          sleep 30
+          cd ../purger-gui && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          sleep 30
+          cd .. && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

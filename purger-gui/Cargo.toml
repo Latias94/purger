@@ -19,12 +19,12 @@ egui.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
-serde_json = "1.0"
+serde_json.workspace = true
 tokio.workspace = true
-rfd = "0.14"
-dirs = "5.0"
-rust-i18n = "3.1"
-sys-locale = "0.3"
+rfd.workspace = true
+dirs.workspace = true
+rust-i18n.workspace = true
+sys-locale.workspace = true
 
 [dev-dependencies]
-tempfile = "3.8"
+tempfile.workspace = true
