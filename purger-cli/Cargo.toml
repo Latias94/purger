@@ -12,7 +12,7 @@ name = "purger_cli"
 path = "src/lib.rs"
 
 [[bin]]
-name = "purger"
+name = "purger-cli"
 path = "src/main.rs"
 
 [dependencies]

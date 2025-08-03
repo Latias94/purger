@@ -11,44 +11,15 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "A tool for cleaning Rust project build directories"
-default-run = "purger"
 
-# 默认安装 CLI 版本
-[[bin]]
-name = "purger"
-path = "purger-cli/src/main.rs"
-
-# 可选安装 GUI 版本
-[[bin]]
-name = "purger-gui"
-path = "purger-gui/src/main.rs"
-required-features = ["gui"]
-
-[features]
-default = ["cli"]
-cli = []
-gui = ["eframe", "egui", "rfd", "dirs", "serde_json", "tokio", "rust-i18n", "sys-locale"]
+# 这个包作为工作空间根，不包含二进制文件
+# 二进制文件由各自的子包提供：
+# - purger-cli 提供 purger-cli 二进制文件
+# - purger-gui 提供 purger-gui 二进制文件
 
 [dependencies]
+# Re-export core functionality
 purger-core = { path = "purger-core" }
-purger-cli = { path = "purger-cli" }
-# CLI dependencies
-anyhow.workspace = true
-clap.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-serde.workspace = true
-toml.workspace = true
-
-# GUI dependencies (optional)
-eframe = { workspace = true, optional = true }
-egui = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
-rfd = { workspace = true, optional = true }
-dirs = { workspace = true, optional = true }
-rust-i18n = { workspace = true, optional = true }
-sys-locale = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -106,7 +77,7 @@ lto = "thin"
 # cargo-dist configuration
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.28.5"
+cargo-dist-version = "0.28.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -122,3 +93,5 @@ targets = [
 pr-run-mode = "plan"
 # Allow dirty working directories
 allow-dirty = ["ci"]
+# Include all workspace binaries
+include = ["purger-cli", "purger-gui"]
