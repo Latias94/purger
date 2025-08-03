@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use ignore::{DirEntry, WalkBuilder};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::filter::ProjectFilter;
@@ -15,6 +17,10 @@ pub struct ScanConfig {
     pub respect_gitignore: bool,
     pub ignore_hidden: bool,
     pub parallel: bool,
+
+    // 性能优化选项
+    /// 是否延迟计算目录大小（只在需要时计算）
+    pub lazy_size_calculation: bool,
 
     // 过滤选项
     /// 保留最近N天编译的项目（基于target目录的最后修改时间）
@@ -34,6 +40,9 @@ impl Default for ScanConfig {
             ignore_hidden: true,
             parallel: true,
 
+            // 性能优化默认值
+            lazy_size_calculation: false, // 默认立即计算大小
+
             // 过滤选项默认值
             keep_days: None,
             keep_size: None,
@@ -45,12 +54,17 @@ impl Default for ScanConfig {
 /// Rust项目扫描器
 pub struct ProjectScanner {
     config: ScanConfig,
+    // 简单的项目缓存，避免重复解析相同的项目
+    cache: Arc<Mutex<HashMap<PathBuf, RustProject>>>,
 }
 
 impl ProjectScanner {
     /// 创建新的扫描器
     pub fn new(config: ScanConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            cache: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// 扫描指定路径下的所有Rust项目
@@ -149,23 +163,42 @@ impl ProjectScanner {
         None
     }
 
-    /// 并行处理项目
+    /// 并行处理项目（带缓存优化）
     fn process_projects_parallel(&self, cargo_dirs: Vec<PathBuf>) -> Result<Vec<RustProject>> {
-        let projects: Result<Vec<_>> = cargo_dirs
+        let cache = Arc::clone(&self.cache);
+
+        let projects: Vec<_> = cargo_dirs
             .into_par_iter()
-            .map(|dir| match RustProject::from_path(&dir) {
-                Ok(project) => {
-                    debug!("成功解析项目: {}", project.name);
-                    Ok(project)
+            .filter_map(|dir| {
+                // 先检查缓存
+                if let Ok(cache_guard) = cache.lock() {
+                    if let Some(cached_project) = cache_guard.get(&dir) {
+                        debug!("从缓存获取项目: {}", cached_project.name);
+                        return Some(cached_project.clone());
+                    }
                 }
-                Err(e) => {
-                    warn!("解析项目失败 {:?}: {}", dir, e);
-                    Err(e)
+
+                // 缓存未命中，解析项目
+                match RustProject::from_path(&dir) {
+                    Ok(project) => {
+                        debug!("成功解析项目: {}", project.name);
+
+                        // 更新缓存
+                        if let Ok(mut cache_guard) = cache.lock() {
+                            cache_guard.insert(dir, project.clone());
+                        }
+
+                        Some(project)
+                    }
+                    Err(e) => {
+                        warn!("解析项目失败 {:?}: {}", dir, e);
+                        None
+                    }
                 }
             })
             .collect();
 
-        projects
+        Ok(projects)
     }
 
     /// 串行处理项目

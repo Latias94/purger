@@ -26,14 +26,8 @@ impl RustProject {
             anyhow::bail!("No Cargo.toml found at {:?}", path);
         }
 
-        let name = Self::extract_project_name(&cargo_toml_path).unwrap_or_else(|| {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string()
-        });
-
-        let is_workspace = Self::is_workspace_project(&cargo_toml_path)?;
+        // 一次性读取和解析 TOML，避免重复 IO
+        let (name, is_workspace) = Self::parse_cargo_toml(&cargo_toml_path, &path)?;
         let target_path = path.join("target");
         let has_target = target_path.exists();
 
@@ -42,9 +36,8 @@ impl RustProject {
                 .context("Failed to get target directory metadata")?
                 .modified()
                 .context("Failed to get target directory modification time")?;
-            // 延迟计算大小，只在需要时计算
-            let size = Self::calculate_directory_size_fast(&target_path)?;
-            (size, modified)
+            // 默认不计算大小，提升扫描速度
+            (0, modified)
         } else {
             (0, SystemTime::UNIX_EPOCH)
         };
@@ -59,16 +52,39 @@ impl RustProject {
         })
     }
 
-    /// 检查是否为workspace项目
-    fn is_workspace_project(cargo_toml_path: &Path) -> Result<bool> {
+    /// 一次性解析 Cargo.toml，提取项目名称和workspace信息
+    fn parse_cargo_toml(cargo_toml_path: &Path, project_path: &Path) -> Result<(String, bool)> {
         let content = fs::read_to_string(cargo_toml_path).context("Failed to read Cargo.toml")?;
-
         let parsed: toml::Value = toml::from_str(&content).context("Failed to parse Cargo.toml")?;
 
+        // 提取项目名称
+        let name = parsed
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                project_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
+
+        // 检查是否为workspace项目
+        let is_workspace = parsed.get("workspace").is_some();
+
+        Ok((name, is_workspace))
+    }
+
+    /// 检查是否为workspace项目（保留向后兼容）
+    fn is_workspace_project(cargo_toml_path: &Path) -> Result<bool> {
+        let content = fs::read_to_string(cargo_toml_path).context("Failed to read Cargo.toml")?;
+        let parsed: toml::Value = toml::from_str(&content).context("Failed to parse Cargo.toml")?;
         Ok(parsed.get("workspace").is_some())
     }
 
-    /// 从Cargo.toml提取项目名称
+    /// 从Cargo.toml提取项目名称（保留向后兼容）
     fn extract_project_name(cargo_toml_path: &Path) -> Option<String> {
         let content = fs::read_to_string(cargo_toml_path).ok()?;
         let parsed: toml::Value = toml::from_str(&content).ok()?;
@@ -98,27 +114,44 @@ impl RustProject {
     /// 快速计算目录大小（优化版本）
     fn calculate_directory_size_fast(dir: &Path) -> Result<u64> {
         use rayon::prelude::*;
+        use std::sync::atomic::{AtomicU64, Ordering};
 
-        // 使用并行遍历来加速大目录的计算
-        let entries: Vec<_> = WalkDir::new(dir)
+        // 使用原子计数器避免收集所有条目到 Vec
+        let total_size = AtomicU64::new(0);
+
+        // 并行遍历，直接累加大小
+        WalkDir::new(dir)
             .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .collect();
+            .par_bridge() // 将串行迭代器转换为并行迭代器
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_file())
+            .for_each(|entry| {
+                if let Ok(metadata) = entry.metadata() {
+                    total_size.fetch_add(metadata.len(), Ordering::Relaxed);
+                }
+            });
 
-        let total_size: u64 = entries
-            .par_iter()
-            .filter_map(|entry| {
-                entry.metadata().ok().map(|m| m.len())
-            })
-            .sum();
-
-        Ok(total_size)
+        Ok(total_size.into_inner())
     }
 
     /// 获取格式化的大小字符串
     pub fn formatted_size(&self) -> String {
-        crate::format_bytes(self.target_size)
+        crate::format_bytes(self.get_target_size())
+    }
+
+    /// 获取target目录大小（按需计算）
+    pub fn get_target_size(&self) -> u64 {
+        if self.target_size > 0 {
+            return self.target_size;
+        }
+
+        if !self.has_target {
+            return 0;
+        }
+
+        // 按需计算大小
+        let target_path = self.target_path();
+        Self::calculate_directory_size_fast(&target_path).unwrap_or(0)
     }
 
     /// 获取相对于给定基础路径的相对路径

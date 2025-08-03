@@ -390,6 +390,7 @@ fn create_scan_config(args: ScanConfigArgs) -> Result<ScanConfig> {
         follow_links: args.follow_symlinks,
         ignore_hidden: !args.include_hidden,
         respect_gitignore: !args.no_gitignore,
+        lazy_size_calculation: false, // 默认不启用延迟计算
         keep_days: args.keep_days,
         keep_size: keep_size_bytes,
         ignore_paths: args.ignore_paths,
