@@ -74,24 +74,23 @@ criterion = { version = "0.7", features = ["html_reports"] }
 inherits = "release"
 lto = "thin"
 
-# cargo-dist configuration
+# Config for 'dist'
 [workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.28.0"
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.29.0"
 # CI backends to support
-ci = "github"
+ci = ["github"]
 # The installers to generate for each app
 installers = ["shell", "powershell"]
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "x86_64-pc-windows-msvc"
-]
-# Publish jobs to run in CI
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Which actions to run on pull requests
 pr-run-mode = "plan"
-# Allow dirty working directories
+# Skip checking whether the specified configuration files are up to date
 allow-dirty = ["ci"]
 # Include all workspace binaries
-include = ["purger-cli", "purger-gui"]
+# This will automatically include purger-cli and purger-gui binaries
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false

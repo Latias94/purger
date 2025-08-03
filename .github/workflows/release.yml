@@ -65,12 +65,7 @@ jobs:
         # we specify bash to get pipefail; it guards against the `curl` command
         # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/astral-sh/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh"
-      - name: Cache dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: cargo-dist-cache
-          path: ~/.cargo/bin/dist
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.29.0/cargo-dist-installer.sh | sh"
       # sure would be cool if github gave us proper conditionals...
       # so here's a doubly-nested ternary-via-truthiness to try to provide the best possible
       # functionality based on whether this is a pull_request, and whether it's from a fork.
@@ -94,7 +89,7 @@ jobs:
     # Let the initial task tell us to not run (currently very blunt)
     needs:
       - plan
-    if: ${{ needs.plan.outputs.val && fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
+    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
       # Target platforms/runners are computed by dist in create-release.
@@ -107,7 +102,7 @@ jobs:
       # Typically there will be:
       # - 1 "global" task that builds universal installers
       # - N "local" tasks that build each platform's binaries and platform-specific installers
-      matrix: ${{ needs.plan.outputs.val && fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix || fromJson('{"include":[]}') }}
+      matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container && matrix.container.image || null }}
     env:
@@ -180,12 +175,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install cached dist
-        uses: actions/download-artifact@v4
-        with:
-          name: cargo-dist-cache
-          path: ~/.cargo/bin/
-      - run: chmod +x ~/.cargo/bin/dist
+      - name: Install dist
+        shell: bash
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.29.0/cargo-dist-installer.sh | sh"
       # Get all the local artifacts for the global tasks to use (for e.g. checksums)
       - name: Fetch local artifacts
         uses: actions/download-artifact@v4
@@ -230,12 +222,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install cached dist
-        uses: actions/download-artifact@v4
-        with:
-          name: cargo-dist-cache
-          path: ~/.cargo/bin/
-      - run: chmod +x ~/.cargo/bin/dist
+      - name: Install dist
+        shell: bash
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.29.0/cargo-dist-installer.sh | sh"
       # Fetch artifacts from scratch-storage
       - name: Fetch artifacts
         uses: actions/download-artifact@v4
@@ -269,9 +258,9 @@ jobs:
           rm -f artifacts/*-dist-manifest.json
       - name: Create GitHub Release
         env:
-          PRERELEASE_FLAG: "${{ steps.host.outputs.manifest && fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
-          ANNOUNCEMENT_TITLE: "${{ steps.host.outputs.manifest && fromJson(steps.host.outputs.manifest).announcement_title || 'Release' }}"
-          ANNOUNCEMENT_BODY: "${{ steps.host.outputs.manifest && fromJson(steps.host.outputs.manifest).announcement_github_body || 'Automated release' }}"
+          PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
+          ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
+          ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
         run: |
           # Write and read notes from a file to avoid quoting breaking things
