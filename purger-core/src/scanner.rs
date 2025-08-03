@@ -454,10 +454,10 @@ edition = "2021"
         #[cfg(unix)]
         {
             let result = scanner.scan(std::path::Path::new("/root"));
-            match result {
-                Ok(projects) => assert!(projects.is_empty()),
-                Err(_) => {} // 权限错误是预期的
+            if let Ok(projects) = result {
+                assert!(projects.is_empty());
             }
+            // 权限错误是预期的
         }
     }
 
