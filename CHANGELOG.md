@@ -7,18 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Initial release preparation
-
 ### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
+- Optimized directory scanning performance with parallel traversal, lazy size calculation, and TOML parsing improvements
 
 ## [0.1.0] - 2025-08-03
 
