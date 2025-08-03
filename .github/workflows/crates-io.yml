@@ -1,23 +1,301 @@
 name: Publish to crates.io
 
 on:
+  # Trigger on GitHub releases
   release:
     types: [published]
 
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (test without publishing)'
+        required: false
+        default: false
+        type: boolean
+      skip_tests:
+        description: 'Skip running tests before publishing'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  publish:
+  # Pre-publish checks
+  pre-checks:
+    name: Pre-publish checks
     runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.check.outputs.should_publish }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      
-      - name: Publish to crates.io
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        if: ${{ !inputs.skip_tests }}
+        run: cargo test --workspace --all-features
+
+      - name: Check if should publish
+        id: check
         run: |
-          # Publish in dependency order
-          cd purger-core && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          if [[ "${{ github.event_name }}" == "release" ]] || [[ "${{ inputs.dry_run }}" == "false" ]]; then
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Publish packages in dependency order
+  publish-core:
+    name: Publish purger-core
+    runs-on: ubuntu-latest
+    needs: pre-checks
+    if: ${{ needs.pre-checks.outputs.should_publish == 'true' || inputs.dry_run == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Dry run publish purger-core
+        if: ${{ inputs.dry_run == 'true' }}
+        working-directory: purger-core
+        run: |
+          echo "🧪 Dry run: Publishing purger-core"
+          cargo publish --dry-run
+
+      - name: Publish purger-core
+        if: ${{ inputs.dry_run != 'true' }}
+        working-directory: purger-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          echo "📦 Publishing purger-core"
+          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+      - name: Wait for crates.io propagation
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          echo "⏳ Waiting 60 seconds for crates.io to propagate purger-core..."
+          sleep 60
+
+  publish-cli:
+    name: Publish purger-cli
+    runs-on: ubuntu-latest
+    needs: publish-core
+    if: ${{ always() && (needs.publish-core.result == 'success' || inputs.dry_run == 'true') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Dry run publish purger-cli
+        if: ${{ inputs.dry_run == 'true' }}
+        working-directory: purger-cli
+        run: |
+          echo "🧪 Dry run: Publishing purger-cli"
+          cargo publish --dry-run
+
+      - name: Publish purger-cli
+        if: ${{ inputs.dry_run != 'true' }}
+        working-directory: purger-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          echo "📦 Publishing purger-cli"
+          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+  publish-gui:
+    name: Publish purger-gui
+    runs-on: ubuntu-latest
+    needs: publish-core
+    if: ${{ always() && (needs.publish-core.result == 'success' || inputs.dry_run == 'true') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Dry run publish purger-gui
+        if: ${{ inputs.dry_run == 'true' }}
+        working-directory: purger-gui
+        run: |
+          echo "🧪 Dry run: Publishing purger-gui"
+          cargo publish --dry-run
+
+      - name: Publish purger-gui
+        if: ${{ inputs.dry_run != 'true' }}
+        working-directory: purger-gui
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          echo "📦 Publishing purger-gui"
+          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+  publish-main:
+    name: Publish purger
+    runs-on: ubuntu-latest
+    needs: [publish-cli, publish-gui]
+    if: ${{ always() && (needs.publish-cli.result == 'success' || needs.publish-cli.result == 'skipped') && (needs.publish-gui.result == 'success' || needs.publish-gui.result == 'skipped') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Wait for dependencies to propagate
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          echo "⏳ Waiting 30 seconds for dependencies to propagate..."
           sleep 30
-          cd ../purger-cli && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          sleep 30
-          cd ../purger-gui && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          sleep 30
-          cd .. && cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Dry run publish purger
+        if: ${{ inputs.dry_run == 'true' }}
+        run: |
+          echo "🧪 Dry run: Publishing purger"
+          cargo publish --dry-run
+
+      - name: Publish purger
+        if: ${{ inputs.dry_run != 'true' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          echo "📦 Publishing purger"
+          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+  # Summary job
+  publish-summary:
+    name: Publish Summary
+    runs-on: ubuntu-latest
+    needs: [pre-checks, publish-core, publish-cli, publish-gui, publish-main]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## 📦 Publication Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "🧪 **Dry Run Mode** - No packages were actually published" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| Package | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Check each job result
+          if [[ "${{ needs.publish-core.result }}" == "success" ]]; then
+            echo "| purger-core | ✅ Published |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.publish-core.result }}" == "skipped" ]]; then
+            echo "| purger-core | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| purger-core | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.publish-cli.result }}" == "success" ]]; then
+            echo "| purger-cli | ✅ Published |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.publish-cli.result }}" == "skipped" ]]; then
+            echo "| purger-cli | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| purger-cli | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.publish-gui.result }}" == "success" ]]; then
+            echo "| purger-gui | ✅ Published |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.publish-gui.result }}" == "skipped" ]]; then
+            echo "| purger-gui | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| purger-gui | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.publish-main.result }}" == "success" ]]; then
+            echo "| purger | ✅ Published |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.publish-main.result }}" == "skipped" ]]; then
+            echo "| purger | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| purger | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ inputs.dry_run }}" != "true" ]]; then
+            echo "🔗 **Links:**" >> $GITHUB_STEP_SUMMARY
+            echo "- [purger-core on crates.io](https://crates.io/crates/purger-core)" >> $GITHUB_STEP_SUMMARY
+            echo "- [purger-cli on crates.io](https://crates.io/crates/purger-cli)" >> $GITHUB_STEP_SUMMARY
+            echo "- [purger-gui on crates.io](https://crates.io/crates/purger-gui)" >> $GITHUB_STEP_SUMMARY
+            echo "- [purger on crates.io](https://crates.io/crates/purger)" >> $GITHUB_STEP_SUMMARY
+          fi

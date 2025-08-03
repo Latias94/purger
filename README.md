@@ -27,7 +27,24 @@ purger/
 
 ## 安装
 
-### 使用 Cargo 安装 (推荐)
+[![Crates.io](https://img.shields.io/crates/v/purger-cli.svg)](https://crates.io/crates/purger-cli)
+[![Crates.io](https://img.shields.io/crates/v/purger-gui.svg)](https://crates.io/crates/purger-gui)
+[![Crates.io](https://img.shields.io/crates/v/purger-core.svg)](https://crates.io/crates/purger-core)
+
+### 从 crates.io 安装 (推荐)
+
+```bash
+# 安装命令行版本
+cargo install purger-cli
+
+# 安装图形界面版本
+cargo install purger-gui
+
+# 或者安装完整包
+cargo install purger
+```
+
+### 从源码编译
 
 ```bash
 # 安装 CLI 版本

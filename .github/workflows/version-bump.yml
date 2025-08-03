@@ -1,0 +1,189 @@
+name: Version Bump and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      custom_version:
+        description: 'Custom version (optional, overrides version_type)'
+        required: false
+        type: string
+      create_release:
+        description: 'Create GitHub release after version bump'
+        required: false
+        default: true
+        type: boolean
+      dry_run:
+        description: 'Dry run mode (show what would be changed)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version-bump:
+    name: Bump version and create release
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      release_created: ${{ steps.release.outputs.release_created }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Get current version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "purger") | .version')
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Calculate new version
+        id: version
+        run: |
+          CURRENT_VERSION="${{ steps.current_version.outputs.current_version }}"
+          
+          if [[ -n "${{ inputs.custom_version }}" ]]; then
+            NEW_VERSION="${{ inputs.custom_version }}"
+            echo "Using custom version: $NEW_VERSION"
+          else
+            # Parse current version
+            IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+            MAJOR=${VERSION_PARTS[0]}
+            MINOR=${VERSION_PARTS[1]}
+            PATCH=${VERSION_PARTS[2]}
+            
+            case "${{ inputs.version_type }}" in
+              "major")
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              "minor")
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              "patch")
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+            
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+            echo "Calculated new version: $NEW_VERSION"
+          fi
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version will be: $NEW_VERSION"
+
+      - name: Update workspace version
+        if: ${{ !inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          echo "Updating workspace version to $NEW_VERSION"
+          
+          # Update workspace version in root Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+          
+          echo "Updated Cargo.toml:"
+          grep -A 10 "\[workspace.package\]" Cargo.toml
+
+      - name: Show what would be changed (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          echo "🧪 DRY RUN: Would update version to $NEW_VERSION"
+          echo "Current Cargo.toml workspace.package section:"
+          grep -A 10 "\[workspace.package\]" Cargo.toml
+          echo ""
+          echo "Would change version line to: version = \"$NEW_VERSION\""
+
+      - name: Verify version update
+        if: ${{ !inputs.dry_run }}
+        run: |
+          # Check that all packages now have the new version
+          cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "\(.name): \(.version)"'
+
+      - name: Commit version bump
+        if: ${{ !inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add Cargo.toml
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git tag "v$NEW_VERSION"
+          git push origin main
+          git push origin "v$NEW_VERSION"
+
+      - name: Create GitHub Release
+        id: release
+        if: ${{ !inputs.dry_run && inputs.create_release }}
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          release_name: Release v${{ steps.version.outputs.new_version }}
+          body: |
+            ## Changes in v${{ steps.version.outputs.new_version }}
+            
+            This release was automatically created by the version bump workflow.
+            
+            ### Installation
+            
+            ```bash
+            # Install CLI tool
+            cargo install purger-cli
+            
+            # Install GUI tool  
+            cargo install purger-gui
+            
+            # Use as library
+            cargo add purger-core
+            ```
+            
+            ### Links
+            - [purger-core on crates.io](https://crates.io/crates/purger-core)
+            - [purger-cli on crates.io](https://crates.io/crates/purger-cli)
+            - [purger-gui on crates.io](https://crates.io/crates/purger-gui)
+            - [purger on crates.io](https://crates.io/crates/purger)
+          draft: false
+          prerelease: false
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Version Bump Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous version:** ${{ steps.current_version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New version:** ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bump type:** ${{ inputs.version_type }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "- **Mode:** 🧪 Dry run (no changes made)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Mode:** ✅ Live run (changes committed)" >> $GITHUB_STEP_SUMMARY
+            if [[ "${{ inputs.create_release }}" == "true" ]]; then
+              echo "- **GitHub Release:** ✅ Created" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **GitHub Release:** ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
