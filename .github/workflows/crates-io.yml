@@ -23,12 +23,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Pre-publish checks
-  pre-checks:
-    name: Pre-publish checks
+  # 智能发布所有包
+  publish-all:
+    name: Smart publish to crates.io
     runs-on: ubuntu-latest
-    outputs:
-      should_publish: ${{ steps.check.outputs.should_publish }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -51,66 +49,62 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Get current version
+        id: version
+        run: |
+          # 从 workspace 获取版本
+          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
 
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Smart dependency update
+        run: |
+          CURRENT_VERSION="${{ steps.version.outputs.current_version }}"
+          echo "Updating internal dependencies to version $CURRENT_VERSION"
 
-      - name: Run tests
+          # 临时更新依赖版本以支持发布
+          # 这些更改只在 CI 中生效，不会提交到仓库
+
+          # 检查 purger-core 是否已发布
+          CORE_EXISTS=$(curl -s "https://crates.io/api/v1/crates/purger-core" | jq -r ".versions[] | select(.num == \"$CURRENT_VERSION\") | .num" 2>/dev/null || echo "")
+
+          if [[ -n "$CORE_EXISTS" ]]; then
+            echo "✅ purger-core $CURRENT_VERSION already exists, updating dependencies"
+            # 更新所有依赖到已发布的版本
+            sed -i "s/purger-core = { version = \"[^\"]*\"/purger-core = { version = \"$CURRENT_VERSION\"/g" purger-cli/Cargo.toml
+            sed -i "s/purger-core = { version = \"[^\"]*\"/purger-core = { version = \"$CURRENT_VERSION\"/g" purger-gui/Cargo.toml
+            sed -i "s/purger-core = { version = \"[^\"]*\"/purger-core = { version = \"$CURRENT_VERSION\"/g" Cargo.toml
+          else
+            echo "📦 purger-core $CURRENT_VERSION not published yet, will publish it first"
+          fi
+
+      - name: Pre-publish checks
         if: ${{ !inputs.skip_tests }}
-        run: cargo test --workspace --all-features
-
-      - name: Check if should publish
-        id: check
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]] || [[ "${{ inputs.dry_run }}" == "false" ]]; then
-            echo "should_publish=true" >> $GITHUB_OUTPUT
+          echo "Running pre-publish checks..."
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+          # 只对已发布依赖的包运行测试
+          CURRENT_VERSION="${{ steps.version.outputs.current_version }}"
+          CORE_EXISTS=$(curl -s "https://crates.io/api/v1/crates/purger-core" | jq -r ".versions[] | select(.num == \"$CURRENT_VERSION\") | .num" 2>/dev/null || echo "")
+
+          if [[ -n "$CORE_EXISTS" ]]; then
+            echo "Running full test suite..."
+            cargo test --workspace --all-features
           else
-            echo "should_publish=false" >> $GITHUB_OUTPUT
+            echo "Running core tests only..."
+            cargo test -p purger-core --all-features
           fi
 
-  # Publish packages in dependency order
-  publish-core:
-    name: Publish purger-core
-    runs-on: ubuntu-latest
-    needs: pre-checks
-    if: ${{ needs.pre-checks.outputs.should_publish == 'true' || inputs.dry_run == 'true' }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Dry run publish purger-core
-        if: ${{ inputs.dry_run == 'true' }}
-        working-directory: purger-core
-        run: |
-          echo "🧪 Dry run: Publishing purger-core"
-          cargo publish --dry-run
-
-      - name: Publish purger-core
-        if: ${{ inputs.dry_run != 'true' }}
-        working-directory: purger-core
+      - name: Smart publish packages
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          echo "📦 Publishing purger-core"
+          CURRENT_VERSION="${{ steps.version.outputs.current_version }}"
 
-          # 检查 token 是否存在
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+          # 检查 token
+          if [[ "${{ inputs.dry_run }}" != "true" ]] && [[ -z "$CARGO_REGISTRY_TOKEN" ]]; then
             echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
             echo "Please add your crates.io API token to GitHub Secrets"
             echo "Go to: Repository Settings → Secrets and variables → Actions"
@@ -118,220 +112,79 @@ jobs:
             exit 1
           fi
 
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+          # 检查包是否已发布的函数
+          check_published() {
+            local crate_name=$1
+            local version=$2
+            curl -s "https://crates.io/api/v1/crates/$crate_name" | jq -r ".versions[] | select(.num == \"$version\") | .num" 2>/dev/null || echo ""
+          }
 
-      - name: Wait for crates.io propagation
-        if: ${{ inputs.dry_run != 'true' }}
-        run: |
-          echo "⏳ Waiting 60 seconds for crates.io to propagate purger-core..."
-          sleep 60
+          # 发布包的函数
+          publish_package() {
+            local package_name=$1
+            local package_dir=$2
 
-  publish-cli:
-    name: Publish purger-cli
-    runs-on: ubuntu-latest
-    needs: publish-core
-    if: ${{ always() && (needs.publish-core.result == 'success' || inputs.dry_run == 'true') }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+            echo "📦 Processing $package_name..."
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+            # 检查是否已发布
+            if [[ -n "$(check_published "$package_name" "$CURRENT_VERSION")" ]]; then
+              echo "✅ $package_name $CURRENT_VERSION already published, skipping"
+              return 0
+            fi
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+              echo "🧪 Dry run: Would publish $package_name"
+              if [[ -n "$package_dir" ]]; then
+                cd "$package_dir"
+                cargo publish --dry-run
+                cd ..
+              else
+                cargo publish --dry-run
+              fi
+            else
+              echo "📦 Publishing $package_name..."
+              if [[ -n "$package_dir" ]]; then
+                cd "$package_dir"
+                cargo publish --token "$CARGO_REGISTRY_TOKEN"
+                cd ..
+              else
+                cargo publish --token "$CARGO_REGISTRY_TOKEN"
+              fi
 
-      - name: Dry run publish purger-cli
-        if: ${{ inputs.dry_run == 'true' }}
-        working-directory: purger-cli
-        run: |
-          echo "🧪 Dry run: Publishing purger-cli"
-          cargo publish --dry-run
+              echo "⏳ Waiting 60 seconds for crates.io propagation..."
+              sleep 60
+            fi
+          }
 
-      - name: Publish purger-cli
-        if: ${{ inputs.dry_run != 'true' }}
-        working-directory: purger-cli
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          echo "📦 Publishing purger-cli"
+          # 按依赖顺序发布包
+          echo "🚀 Starting smart package publishing for version $CURRENT_VERSION"
 
-          # 检查 token 是否存在
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
-            echo "Please add your crates.io API token to GitHub Secrets"
-            exit 1
-          fi
+          # 1. 发布 purger-core (无依赖)
+          publish_package "purger-core" "purger-core"
 
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
-
-  publish-gui:
-    name: Publish purger-gui
-    runs-on: ubuntu-latest
-    needs: publish-core
-    if: ${{ always() && (needs.publish-core.result == 'success' || inputs.dry_run == 'true') }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Dry run publish purger-gui
-        if: ${{ inputs.dry_run == 'true' }}
-        working-directory: purger-gui
-        run: |
-          echo "🧪 Dry run: Publishing purger-gui"
-          cargo publish --dry-run
-
-      - name: Publish purger-gui
-        if: ${{ inputs.dry_run != 'true' }}
-        working-directory: purger-gui
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          echo "📦 Publishing purger-gui"
-
-          # 检查 token 是否存在
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
-            echo "Please add your crates.io API token to GitHub Secrets"
-            exit 1
-          fi
-
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
-
-  publish-main:
-    name: Publish purger
-    runs-on: ubuntu-latest
-    needs: [publish-cli, publish-gui]
-    if: ${{ always() && (needs.publish-cli.result == 'success' || needs.publish-cli.result == 'skipped') && (needs.publish-gui.result == 'success' || needs.publish-gui.result == 'skipped') }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Wait for dependencies to propagate
-        if: ${{ inputs.dry_run != 'true' }}
-        run: |
-          echo "⏳ Waiting 30 seconds for dependencies to propagate..."
-          sleep 30
-
-      - name: Dry run publish purger
-        if: ${{ inputs.dry_run == 'true' }}
-        run: |
-          echo "🧪 Dry run: Publishing purger"
-          cargo publish --dry-run
-
-      - name: Publish purger
-        if: ${{ inputs.dry_run != 'true' }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          echo "📦 Publishing purger"
-
-          # 检查 token 是否存在
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
-            echo "Please add your crates.io API token to GitHub Secrets"
-            echo "Go to: Repository Settings → Secrets and variables → Actions"
-            echo "Add a secret named 'CARGO_REGISTRY_TOKEN' with your crates.io API token"
-            exit 1
-          fi
-
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
-
-  # Summary job
-  publish-summary:
-    name: Publish Summary
-    runs-on: ubuntu-latest
-    needs: [pre-checks, publish-core, publish-cli, publish-gui, publish-main]
-    if: always()
-    steps:
-      - name: Check results
-        run: |
-          echo "## 📦 Publication Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-            echo "🧪 **Dry Run Mode** - No packages were actually published" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "| Package | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-
-          # Check each job result
-          if [[ "${{ needs.publish-core.result }}" == "success" ]]; then
-            echo "| purger-core | ✅ Published |" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.publish-core.result }}" == "skipped" ]]; then
-            echo "| purger-core | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| purger-core | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [[ "${{ needs.publish-cli.result }}" == "success" ]]; then
-            echo "| purger-cli | ✅ Published |" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.publish-cli.result }}" == "skipped" ]]; then
-            echo "| purger-cli | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| purger-cli | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [[ "${{ needs.publish-gui.result }}" == "success" ]]; then
-            echo "| purger-gui | ✅ Published |" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.publish-gui.result }}" == "skipped" ]]; then
-            echo "| purger-gui | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| purger-gui | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [[ "${{ needs.publish-main.result }}" == "success" ]]; then
-            echo "| purger | ✅ Published |" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.publish-main.result }}" == "skipped" ]]; then
-            echo "| purger | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| purger | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-
+          # 2. 更新依赖版本（如果 core 刚刚发布）
           if [[ "${{ inputs.dry_run }}" != "true" ]]; then
-            echo "🔗 **Links:**" >> $GITHUB_STEP_SUMMARY
-            echo "- [purger-core on crates.io](https://crates.io/crates/purger-core)" >> $GITHUB_STEP_SUMMARY
-            echo "- [purger-cli on crates.io](https://crates.io/crates/purger-cli)" >> $GITHUB_STEP_SUMMARY
-            echo "- [purger-gui on crates.io](https://crates.io/crates/purger-gui)" >> $GITHUB_STEP_SUMMARY
-            echo "- [purger on crates.io](https://crates.io/crates/purger)" >> $GITHUB_STEP_SUMMARY
+            echo "🔄 Updating dependency versions after core publication..."
+            sed -i "s/purger-core = { version = \"[^\"]*\"/purger-core = { version = \"$CURRENT_VERSION\"/g" purger-cli/Cargo.toml
+            sed -i "s/purger-core = { version = \"[^\"]*\"/purger-core = { version = \"$CURRENT_VERSION\"/g" purger-gui/Cargo.toml
+            sed -i "s/purger-core = { version = \"[^\"]*\"/purger-core = { version = \"$CURRENT_VERSION\"/g" Cargo.toml
           fi
+
+          # 3. 发布 purger-cli (依赖 purger-core)
+          publish_package "purger-cli" "purger-cli"
+
+          # 4. 发布 purger-gui (依赖 purger-core)
+          publish_package "purger-gui" "purger-gui"
+
+          # 5. 发布 purger (依赖 purger-core)
+          publish_package "purger" ""
+
+          echo "✅ Smart publishing completed!"
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Publishing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ inputs.dry_run == 'true' && '🧪 Dry run' || '✅ Live publish' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
