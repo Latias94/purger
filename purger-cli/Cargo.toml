@@ -21,7 +21,7 @@ name = "purger-cli"
 path = "src/main.rs"
 
 [dependencies]
-purger-core = { version = "0.1.0", path = "../purger-core" }
+purger-core = { version = "0.3.0", path = "../purger-core" }
 anyhow.workspace = true
 clap.workspace = true
 tracing.workspace = true

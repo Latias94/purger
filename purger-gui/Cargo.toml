@@ -17,7 +17,7 @@ name = "purger-gui"
 path = "src/main.rs"
 
 [dependencies]
-purger-core = { version = "0.1.0", path = "../purger-core" }
+purger-core = { version = "0.3.0", path = "../purger-core" }
 anyhow.workspace = true
 eframe.workspace = true
 egui.workspace = true

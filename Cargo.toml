@@ -19,7 +19,7 @@ description = "A tool for cleaning Rust project build directories"
 
 [dependencies]
 # Re-export core functionality
-purger-core = { version = "0.1.0", path = "purger-core" }
+purger-core = { version = "0.3.0", path = "purger-core" }
 
 [dev-dependencies]
 tempfile.workspace = true
