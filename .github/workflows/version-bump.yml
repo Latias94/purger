@@ -27,6 +27,11 @@ on:
         default: false
         type: boolean
 
+# 配置工作流权限
+permissions:
+  contents: write  # 允许推送代码和创建标签
+  pull-requests: write  # 允许创建和修改PR（如果需要）
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -41,8 +46,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # 优先使用 PAT，如果没有则使用默认的 GITHUB_TOKEN
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -124,15 +131,28 @@ jobs:
 
       - name: Commit version bump
         if: ${{ !inputs.dry_run }}
+        env:
+          # 使用与 checkout 相同的 token
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+
+          # 配置 git 用户信息
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # 添加并提交更改
           git add Cargo.toml
           git commit -m "chore: bump version to $NEW_VERSION"
           git tag "v$NEW_VERSION"
+
+          # 推送更改和标签
+          echo "Pushing changes to main branch..."
           git push origin main
+          echo "Pushing tag v$NEW_VERSION..."
           git push origin "v$NEW_VERSION"
+
+          echo "✅ Successfully pushed version bump and tag"
 
       - name: Create GitHub Release
         id: release
