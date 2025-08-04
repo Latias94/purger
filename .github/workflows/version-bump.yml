@@ -106,12 +106,77 @@ jobs:
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           echo "Updating workspace version to $NEW_VERSION"
-          
+
           # Update workspace version in root Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
-          
+
           echo "Updated Cargo.toml:"
           grep -A 10 "\[workspace.package\]" Cargo.toml
+
+      - name: Update CHANGELOG.md
+        if: ${{ !inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          CURRENT_DATE=$(date +%Y-%m-%d)
+
+          if [ -f "CHANGELOG.md" ]; then
+            echo "Updating CHANGELOG.md for version $NEW_VERSION"
+
+            # 检查是否已经有这个版本的条目
+            if grep -q "## \[$NEW_VERSION\]" CHANGELOG.md; then
+              echo "Version $NEW_VERSION already exists in CHANGELOG.md, updating date..."
+              # 更新现有条目的日期
+              sed -i "s/^## \[$NEW_VERSION\].*/## [$NEW_VERSION] - $CURRENT_DATE/" CHANGELOG.md
+            else
+              echo "Adding new version entry to CHANGELOG.md"
+              # 使用 Python 来安全地插入新版本条目
+              python3 << 'EOF'
+          import sys
+          import re
+
+          new_version = "$NEW_VERSION"
+          current_date = "$CURRENT_DATE"
+
+          with open("CHANGELOG.md", "r") as f:
+              content = f.read()
+
+          # 找到第一个版本条目的位置
+          pattern = r'^## \['
+          lines = content.split('\n')
+          insert_index = -1
+
+          for i, line in enumerate(lines):
+              if re.match(pattern, line):
+                  insert_index = i
+                  break
+
+          if insert_index != -1:
+              # 插入新版本条目
+              new_entry = [
+                  f"## [{new_version}] - {current_date}",
+                  "",
+                  "### Changed",
+                  f"- Version bump to {new_version}",
+                  ""
+              ]
+
+              # 在找到的位置插入新条目
+              lines[insert_index:insert_index] = new_entry
+
+              with open("CHANGELOG.md", "w") as f:
+                  f.write('\n'.join(lines))
+
+              print(f"Successfully added version {new_version} to CHANGELOG.md")
+          else:
+              print("Could not find existing version entries in CHANGELOG.md")
+          EOF
+            fi
+
+            echo "Updated CHANGELOG.md:"
+            head -20 CHANGELOG.md
+          else
+            echo "CHANGELOG.md not found, skipping update"
+          fi
 
       - name: Show what would be changed (dry run)
         if: ${{ inputs.dry_run }}
@@ -142,7 +207,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
 
           # 添加并提交更改
-          git add Cargo.toml
+          git add Cargo.toml CHANGELOG.md
           git commit -m "chore: bump version to $NEW_VERSION"
           git tag "v$NEW_VERSION"
 
@@ -154,40 +219,112 @@ jobs:
 
           echo "✅ Successfully pushed version bump and tag"
 
+      - name: Extract changelog content
+        id: changelog
+        if: ${{ !inputs.dry_run && inputs.create_release }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          # 从 CHANGELOG.md 中提取当前版本的内容
+          if [ -f "CHANGELOG.md" ]; then
+            echo "Extracting changelog content for version $NEW_VERSION..."
+
+            # 使用 sed 和 awk 提取版本内容
+            CHANGELOG_CONTENT=$(sed -n "/^## \[$NEW_VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$d' | tail -n +2)
+
+            if [ -n "$CHANGELOG_CONTENT" ]; then
+              echo "Found changelog content for version $NEW_VERSION"
+              # 将内容保存到环境变量，处理多行内容
+              {
+                echo 'CHANGELOG_CONTENT<<EOF'
+                echo "$CHANGELOG_CONTENT"
+                echo 'EOF'
+              } >> $GITHUB_ENV
+              echo "changelog_found=true" >> $GITHUB_OUTPUT
+            else
+              echo "No changelog content found for version $NEW_VERSION"
+              echo "changelog_found=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "CHANGELOG.md not found"
+            echo "changelog_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare release body
+        id: release_body
+        if: ${{ !inputs.dry_run && inputs.create_release }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          # 创建基础的安装说明
+          INSTALLATION_SECTION="
+          ### Installation
+
+          \`\`\`bash
+          # Install CLI tool
+          cargo install purger-cli
+
+          # Install GUI tool
+          cargo install purger-gui
+
+          # Use as library
+          cargo add purger-core
+          \`\`\`
+
+          ### Links
+          - [purger-core on crates.io](https://crates.io/crates/purger-core)
+          - [purger-cli on crates.io](https://crates.io/crates/purger-cli)
+          - [purger-gui on crates.io](https://crates.io/crates/purger-gui)
+          - [purger on crates.io](https://crates.io/crates/purger)"
+
+          if [ "${{ steps.changelog.outputs.changelog_found }}" = "true" ]; then
+            # 使用 changelog 内容
+            RELEASE_BODY="## Changes in v$NEW_VERSION
+
+          $CHANGELOG_CONTENT
+
+          ---
+          $INSTALLATION_SECTION"
+          else
+            # 使用默认内容
+            RELEASE_BODY="## Changes in v$NEW_VERSION
+
+          This release was automatically created by the version bump workflow.
+          $INSTALLATION_SECTION"
+          fi
+
+          # 保存到环境变量
+          {
+            echo 'RELEASE_BODY<<EOF'
+            echo "$RELEASE_BODY"
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
       - name: Create GitHub Release
         id: release
         if: ${{ !inputs.dry_run && inputs.create_release }}
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.version.outputs.new_version }}
-          release_name: Release v${{ steps.version.outputs.new_version }}
-          body: |
-            ## Changes in v${{ steps.version.outputs.new_version }}
-            
-            This release was automatically created by the version bump workflow.
-            
-            ### Installation
-            
-            ```bash
-            # Install CLI tool
-            cargo install purger-cli
-            
-            # Install GUI tool  
-            cargo install purger-gui
-            
-            # Use as library
-            cargo add purger-core
-            ```
-            
-            ### Links
-            - [purger-core on crates.io](https://crates.io/crates/purger-core)
-            - [purger-cli on crates.io](https://crates.io/crates/purger-cli)
-            - [purger-gui on crates.io](https://crates.io/crates/purger-gui)
-            - [purger on crates.io](https://crates.io/crates/purger)
-          draft: false
-          prerelease: false
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          TAG_NAME="v$NEW_VERSION"
+          RELEASE_TITLE="Release v$NEW_VERSION"
+
+          # 创建临时文件存储 release body
+          TEMP_FILE=$(mktemp)
+          echo "$RELEASE_BODY" > "$TEMP_FILE"
+
+          # 使用 GitHub CLI 创建 release
+          gh release create "$TAG_NAME" \
+            --title "$RELEASE_TITLE" \
+            --notes-file "$TEMP_FILE" \
+            --target main
+
+          # 清理临时文件
+          rm "$TEMP_FILE"
+
+          echo "✅ Successfully created GitHub Release: $TAG_NAME"
+          echo "release_created=true" >> $GITHUB_OUTPUT
 
       - name: Summary
         run: |

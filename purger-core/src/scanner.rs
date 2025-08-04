@@ -84,7 +84,11 @@ impl ProjectScanner {
         // 优化的文件遍历
         let cargo_dirs = self.find_cargo_projects(root_path)?;
         let find_time = start_time.elapsed();
-        info!("找到 {} 个Cargo.toml文件，耗时: {:?}", cargo_dirs.len(), find_time);
+        info!(
+            "找到 {} 个Cargo.toml文件，耗时: {:?}",
+            cargo_dirs.len(),
+            find_time
+        );
 
         // 并行或串行处理项目
         let parse_start = std::time::Instant::now();
@@ -95,7 +99,11 @@ impl ProjectScanner {
         };
         let parse_time = parse_start.elapsed();
 
-        info!("成功解析 {} 个Rust项目，耗时: {:?}", projects.len(), parse_time);
+        info!(
+            "成功解析 {} 个Rust项目，耗时: {:?}",
+            projects.len(),
+            parse_time
+        );
         info!("总扫描时间: {:?}", start_time.elapsed());
 
         // 应用过滤器
@@ -119,7 +127,12 @@ impl ProjectScanner {
         // 启用并行遍历以提升性能
         if self.config.parallel {
             // 使用系统CPU核心数，但限制最大线程数避免过度并发
-            let thread_count = std::cmp::min(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4), 8);
+            let thread_count = std::cmp::min(
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4),
+                8,
+            );
             builder.threads(thread_count);
             debug!("启用并行文件遍历，线程数: {}", thread_count);
         }

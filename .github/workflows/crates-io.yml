@@ -108,7 +108,17 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           echo "📦 Publishing purger-core"
-          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+          # 检查 token 是否存在
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
+            echo "Please add your crates.io API token to GitHub Secrets"
+            echo "Go to: Repository Settings → Secrets and variables → Actions"
+            echo "Add a secret named 'CARGO_REGISTRY_TOKEN' with your crates.io API token"
+            exit 1
+          fi
+
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
 
       - name: Wait for crates.io propagation
         if: ${{ inputs.dry_run != 'true' }}
@@ -153,7 +163,15 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           echo "📦 Publishing purger-cli"
-          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+          # 检查 token 是否存在
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
+            echo "Please add your crates.io API token to GitHub Secrets"
+            exit 1
+          fi
+
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
 
   publish-gui:
     name: Publish purger-gui
@@ -192,7 +210,15 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           echo "📦 Publishing purger-gui"
-          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+          # 检查 token 是否存在
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
+            echo "Please add your crates.io API token to GitHub Secrets"
+            exit 1
+          fi
+
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
 
   publish-main:
     name: Publish purger
@@ -235,7 +261,17 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           echo "📦 Publishing purger"
-          cargo publish --token $CARGO_REGISTRY_TOKEN
+
+          # 检查 token 是否存在
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "❌ Error: CARGO_REGISTRY_TOKEN is not set"
+            echo "Please add your crates.io API token to GitHub Secrets"
+            echo "Go to: Repository Settings → Secrets and variables → Actions"
+            echo "Add a secret named 'CARGO_REGISTRY_TOKEN' with your crates.io API token"
+            exit 1
+          fi
+
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
 
   # Summary job
   publish-summary:
