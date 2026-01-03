@@ -3,11 +3,11 @@ use purger_core::{CleanResult, ProjectCleaner, RustProject, cleaner::CleanConfig
 use std::sync::mpsc;
 use std::thread;
 
-/// 清理事件处理器
+/// Cleaning event handler
 pub struct CleanHandler;
 
 impl CleanHandler {
-    /// 开始清理
+    /// Start cleaning
     pub fn start_clean(
         selected_projects: Vec<RustProject>,
         config: CleanConfig,
@@ -15,9 +15,11 @@ impl CleanHandler {
         stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) {
         thread::spawn(move || {
+            let start_time = std::time::Instant::now();
             let cleaner = ProjectCleaner::new(config);
             let total = selected_projects.len();
             let mut total_freed = 0u64;
+            let mut result = CleanResult::new();
 
             let _ = sender.send(AppMessage::CleanProgress(0, total, 0));
 
@@ -36,6 +38,7 @@ impl CleanHandler {
                 }) {
                     Ok(size_freed) => {
                         total_freed += size_freed;
+                        result.add_success(size_freed);
                         let _ = sender.send(AppMessage::CleanProjectComplete(
                             project.name.clone(),
                             size_freed,
@@ -43,19 +46,19 @@ impl CleanHandler {
                         let _ = sender.send(AppMessage::CleanProgress(i + 1, total, total_freed));
                     }
                     Err(e) => {
-                        let _ = sender.send(AppMessage::CleanError(format!(
-                            "清理项目 {} 失败: {}",
-                            project.name, e
-                        )));
-                        return;
+                        result.add_failure(project.name.clone());
+                        let _ = sender.send(AppMessage::CleanProjectError(
+                            project.name.clone(),
+                            e.to_string(),
+                        ));
+                        let _ = sender.send(AppMessage::CleanProgress(i + 1, total, total_freed));
+                        continue;
                     }
                 }
             }
 
-            // 创建清理结果
-            let mut result = CleanResult::new();
-            result.cleaned_projects = selected_projects.len();
             result.total_size_freed = total_freed;
+            result.duration_ms = start_time.elapsed().as_millis() as u64;
 
             if !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = sender.send(AppMessage::CleanComplete(result));

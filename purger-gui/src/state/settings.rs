@@ -2,7 +2,7 @@ use crate::simple_i18n::Language;
 use purger_core::CleanStrategy;
 use serde::{Deserialize, Serialize};
 
-/// 应用设置
+/// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub recent_paths: Vec<String>,
@@ -49,12 +49,12 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
-    /// 获取配置文件路径
+    /// Get config file path
     fn config_file_path() -> Option<std::path::PathBuf> {
         dirs::config_dir().map(|dir| dir.join("purger").join("settings.json"))
     }
 
-    /// 从文件加载设置
+    /// Load settings from file
     pub fn load_from_file() -> Self {
         if let Some(config_path) = Self::config_file_path() {
             if config_path.exists() {
@@ -71,7 +71,7 @@ impl AppSettings {
         Self::default()
     }
 
-    /// 保存设置到文件
+    /// Save settings to file
     pub fn save_to_file(&self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(config_path) = Self::config_file_path() {
             // 确保目录存在
@@ -86,7 +86,7 @@ impl AppSettings {
         Ok(())
     }
 
-    /// 添加最近使用的路径
+    /// Add a recent path
     pub fn add_recent_path(&mut self, path: String) {
         // 移除已存在的相同路径
         self.recent_paths.retain(|p| p != &path);
@@ -100,13 +100,13 @@ impl AppSettings {
         }
     }
 
-    /// 获取最近使用的路径
+    /// Get recent paths
     #[allow(dead_code)]
     pub fn get_recent_paths(&self) -> &[String] {
         &self.recent_paths
     }
 
-    /// 清除最近路径
+    /// Clear recent paths
     pub fn clear_recent_paths(&mut self) {
         self.recent_paths.clear();
     }

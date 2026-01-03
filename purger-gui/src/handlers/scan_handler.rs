@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-/// 扫描事件处理器
+/// Scan event handler
 pub struct ScanHandler;
 
 impl ScanHandler {
-    /// 开始扫描
+    /// Start scanning
     pub fn start_scan(
         path: PathBuf,
         max_depth: Option<usize>,
@@ -50,9 +50,6 @@ impl ScanHandler {
                         std::thread::sleep(std::time::Duration::from_millis(10));
                     }
 
-                    if settings.target_only {
-                        projects = ProjectScanner::filter_with_target(projects);
-                    }
                     projects = ProjectScanner::sort_by_size(projects);
 
                     if !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -68,7 +65,7 @@ impl ScanHandler {
         });
     }
 
-    /// 选择文件夹
+    /// Select a folder
     pub fn select_folder() -> Option<String> {
         rfd::FileDialog::new()
             .set_title("选择要扫描的文件夹")

@@ -2,22 +2,32 @@ use eframe::egui;
 use purger_core::{CleanPhase, cleaner::CleanConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::SystemTime;
 
 use crate::handlers::{CleanHandler, ScanHandler};
 use crate::simple_i18n::{Language, detect_system_language, set_language};
 use crate::state::{AppData, AppMessage, AppSettings, AppState};
-use crate::ui::{Dialogs, MenuBar, ProgressBar, ProjectList, ScanPanel};
+use crate::tr;
+use crate::ui::{
+    ActionBar, Dialogs, FiltersPanel, MenuBar, ProgressBar, ProjectDetails, ProjectList,
+    ProjectSort, ScanPanel,
+};
 
-/// 主应用结构
+/// Main application
 pub struct PurgerApp {
     // 设置
     settings: AppSettings,
 
     // UI状态
     scan_path: String,
-    max_depth: String,
     show_settings: bool,
     show_about: bool,
+    show_clean_confirm: bool,
+
+    // 列表视图状态
+    search_query: String,
+    sort: ProjectSort,
+    show_selected_only: bool,
 
     // 应用状态和数据
     state: AppState,
@@ -30,8 +40,10 @@ pub struct PurgerApp {
 }
 
 impl PurgerApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (sender, receiver) = mpsc::channel();
+
+        apply_compact_style(&cc.egui_ctx);
 
         // 从文件加载设置
         let mut settings = AppSettings::load_from_file();
@@ -47,14 +59,17 @@ impl PurgerApp {
         set_language(settings.language);
 
         let scan_path = settings.last_scan_path.clone();
-        let max_depth = settings.max_depth.to_string();
 
         Self {
             settings,
             scan_path,
-            max_depth,
             show_settings: false,
             show_about: false,
+            show_clean_confirm: false,
+
+            search_query: String::new(),
+            sort: ProjectSort::SizeDesc,
+            show_selected_only: false,
 
             state: AppState::Idle,
             data: AppData::new(),
@@ -65,13 +80,7 @@ impl PurgerApp {
         }
     }
 
-    /// 获取设置的引用
-    #[allow(dead_code)]
-    pub fn settings(&self) -> &AppSettings {
-        &self.settings
-    }
-
-    /// 处理消息
+    /// Handle incoming messages
     fn handle_messages(&mut self) {
         while let Ok(message) = self.receiver.try_recv() {
             match message {
@@ -104,7 +113,6 @@ impl PurgerApp {
                     self.data.current_cleaning_project = Some(project_name);
                 }
                 AppMessage::CleanProjectProgress(progress) => {
-                    // 更新当前清理项目的详细进度
                     self.data.current_cleaning_project = Some(format!(
                         "{} - {} ({}/{})",
                         progress.project_name,
@@ -120,35 +128,37 @@ impl PurgerApp {
                     ));
                 }
                 AppMessage::CleanProjectComplete(project_name, _size_freed) => {
-                    // 项目清理完成，可以在这里添加更详细的日志
                     tracing::info!("项目 {} 清理完成", project_name);
+                }
+                AppMessage::CleanProjectError(project_name, error) => {
+                    self.data
+                        .clean_errors
+                        .push((project_name.clone(), error.clone()));
+                    self.data.error_message =
+                        Some(format!("项目 {project_name} 清理失败: {error}"));
                 }
                 AppMessage::CleanComplete(result) => {
                     self.state = AppState::Idle;
                     self.data.clean_progress = None;
                     self.data.current_cleaning_project = None;
                     self.data.last_clean_result = Some(result);
+                    self.data.error_message = None;
                     self.stop_requested
                         .store(false, std::sync::atomic::Ordering::Relaxed);
-                    // 重新扫描以更新项目状态
                     self.start_scan();
-                }
-                AppMessage::CleanError(error) => {
-                    self.state = AppState::Idle;
-                    self.data.clean_progress = None;
-                    self.data.current_cleaning_project = None;
-                    self.data.error_message = Some(format!("清理失败: {error}"));
-                    self.stop_requested
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
     }
 
-    /// 开始扫描
+    /// Start scanning
     fn start_scan(&mut self) {
         let path = PathBuf::from(&self.scan_path);
-        let max_depth = self.max_depth.parse().ok();
+        let max_depth = if self.settings.max_depth == 0 {
+            None
+        } else {
+            Some(self.settings.max_depth)
+        };
 
         self.state = AppState::Scanning;
         self.data.error_message = None;
@@ -165,7 +175,7 @@ impl PurgerApp {
         );
     }
 
-    /// 开始清理
+    /// Start cleaning
     fn start_clean(&mut self) {
         let selected_projects: Vec<_> = self
             .data
@@ -180,6 +190,7 @@ impl PurgerApp {
 
         self.state = AppState::Cleaning;
         self.data.error_message = None;
+        self.data.clean_errors.clear();
         self.data.clean_progress = Some((0, selected_projects.len(), 0));
         self.stop_requested
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -203,14 +214,24 @@ impl PurgerApp {
         );
     }
 
-    /// 选择文件夹
+    /// Stop the current operation
+    fn stop_operation(&mut self) {
+        self.stop_requested
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.state = AppState::Idle;
+        self.data.scan_progress = None;
+        self.data.clean_progress = None;
+        self.data.current_cleaning_project = None;
+    }
+
+    /// Select a folder
     fn select_folder(&mut self) {
         if let Some(path) = ScanHandler::select_folder() {
             self.scan_path = path;
         }
     }
 
-    /// 保存设置
+    /// Save settings
     fn save_settings(&self) {
         if self.settings.auto_save_settings {
             if let Err(e) = self.settings.save_to_file() {
@@ -218,16 +239,59 @@ impl PurgerApp {
             }
         }
     }
+
+    fn visible_project_indices(&self) -> Vec<usize> {
+        let query = self.search_query.trim().to_lowercase();
+        let mut indices: Vec<usize> = (0..self.data.projects.len()).collect();
+
+        indices.retain(|&i| {
+            let project = &self.data.projects[i];
+
+            if self.settings.target_only && !project.has_target {
+                return false;
+            }
+            if self.show_selected_only && !self.data.is_selected(project) {
+                return false;
+            }
+            if query.is_empty() {
+                return true;
+            }
+
+            project.name.to_lowercase().contains(&query)
+                || project
+                    .path
+                    .display()
+                    .to_string()
+                    .to_lowercase()
+                    .contains(&query)
+        });
+
+        indices.sort_by(|&a, &b| {
+            let pa = &self.data.projects[a];
+            let pb = &self.data.projects[b];
+            match self.sort {
+                ProjectSort::SizeDesc => pb.target_size.cmp(&pa.target_size),
+                ProjectSort::ModifiedDesc => {
+                    system_time_key(pb.last_modified).cmp(&system_time_key(pa.last_modified))
+                }
+                ProjectSort::NameAsc => pa.name.cmp(&pb.name),
+                ProjectSort::PathAsc => pa.path.cmp(&pb.path),
+            }
+        });
+
+        indices
+    }
 }
 
 impl eframe::App for PurgerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_messages();
 
-        // 处理UI事件
         let mut on_select_folder = false;
         let mut on_start_scan = false;
-        let mut on_start_clean = false;
+        let mut on_stop = false;
+        let mut on_request_clean = false;
+        let mut on_confirm_clean = false;
 
         // 菜单栏
         MenuBar::show(
@@ -237,32 +301,96 @@ impl eframe::App for PurgerApp {
             &mut on_select_folder,
         );
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // 扫描配置区域
+        // 顶部扫描工具栏
+        egui::TopBottomPanel::top("scan_toolbar").show(ctx, |ui| {
             ScanPanel::show(
                 ui,
                 &mut self.scan_path,
-                &mut self.max_depth,
                 &mut self.settings,
                 &self.state,
                 &mut on_select_folder,
                 &mut on_start_scan,
+                &mut on_stop,
             );
+        });
 
-            ui.separator();
+        // 左侧筛选
+        egui::SidePanel::left("filters_panel")
+            .default_width(240.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                FiltersPanel::show(
+                    ui,
+                    &mut self.settings,
+                    &mut self.search_query,
+                    &mut self.sort,
+                    &mut self.show_selected_only,
+                );
+            });
 
-            // 进度显示
+        // 右侧详情
+        egui::SidePanel::right("details_panel")
+            .default_width(280.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ProjectDetails::show(ui, &mut self.data);
+            });
+
+        // 底部操作栏 + 进度
+        egui::TopBottomPanel::bottom("actions_panel").show(ctx, |ui| {
             ProgressBar::show_all_progress(ui, &self.state, &self.data);
-
             ui.separator();
+            ActionBar::show(ui, &mut self.data, &self.state, &mut on_request_clean);
+        });
 
-            // 项目列表
-            ProjectList::show(ui, &mut self.data, &self.state, &mut on_start_clean);
+        // 中间主列表
+        let visible = self.visible_project_indices();
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ProjectList::show(ui, &mut self.data, &self.state, &visible);
         });
 
         // 对话框
         Dialogs::show_settings(ctx, &mut self.show_settings, &mut self.settings);
         Dialogs::show_about(ctx, &mut self.show_about);
+
+        if self.show_clean_confirm {
+            let selected_count = self.data.get_selected_count();
+            let total_selected_size = self.data.get_total_cleanable_size();
+            let strategy_text = match self.settings.clean_strategy {
+                purger_core::CleanStrategy::CargoClean => tr!("strategy.cargo_clean"),
+                purger_core::CleanStrategy::DirectDelete => tr!("strategy.direct_delete"),
+            };
+
+            egui::Window::new(tr!("clean.confirm_title"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.label(tr!(
+                        "clean.confirm_message",
+                        count = selected_count,
+                        size = purger_core::format_bytes(total_selected_size)
+                    ));
+                    ui.label(tr!("clean.confirm_strategy", strategy = strategy_text));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(tr!("dialog.cancel")).clicked() {
+                            self.show_clean_confirm = false;
+                        }
+                        let can_confirm = selected_count > 0 && self.state == AppState::Idle;
+                        if ui
+                            .add_enabled(
+                                can_confirm,
+                                egui::Button::new(tr!("clean.confirm_button")),
+                            )
+                            .clicked()
+                        {
+                            on_confirm_clean = true;
+                            self.show_clean_confirm = false;
+                        }
+                    });
+                });
+        }
 
         // 处理事件
         if on_select_folder {
@@ -271,15 +399,48 @@ impl eframe::App for PurgerApp {
         if on_start_scan {
             self.start_scan();
         }
-        if on_start_clean {
+        if on_stop {
+            self.stop_operation();
+        }
+        if on_request_clean {
+            self.show_clean_confirm = true;
+        }
+        if on_confirm_clean {
             self.start_clean();
         }
 
-        // 定期刷新UI
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
         self.save_settings();
     }
+}
+
+fn system_time_key(time: SystemTime) -> u64 {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn apply_compact_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+
+    style.spacing.item_spacing = egui::vec2(6.0, 2.0);
+    style.spacing.button_padding = egui::vec2(6.0, 2.0);
+    style.spacing.window_margin = egui::Margin::same(8);
+    style.spacing.menu_margin = egui::Margin::same(6);
+    style.spacing.indent = 14.0;
+    style.spacing.interact_size = egui::vec2(32.0, 18.0);
+
+    style.text_styles = [
+        (egui::TextStyle::Heading, egui::FontId::proportional(18.0)),
+        (egui::TextStyle::Body, egui::FontId::proportional(13.0)),
+        (egui::TextStyle::Monospace, egui::FontId::monospace(12.0)),
+        (egui::TextStyle::Button, egui::FontId::proportional(13.0)),
+        (egui::TextStyle::Small, egui::FontId::proportional(11.0)),
+    ]
+    .into();
+
+    ctx.set_style(style);
 }

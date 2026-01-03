@@ -2,11 +2,11 @@ use crate::state::{AppData, AppState};
 use crate::tr;
 use eframe::egui;
 
-/// 进度条组件
+/// Progress display
 pub struct ProgressBar;
 
 impl ProgressBar {
-    /// 显示扫描进度
+    /// Show scan progress
     pub fn show_scan_progress(ui: &mut egui::Ui, data: &AppData) {
         if let Some((current, total)) = data.scan_progress {
             ui.horizontal(|ui| {
@@ -21,7 +21,7 @@ impl ProgressBar {
         }
     }
 
-    /// 显示清理进度
+    /// Show clean progress
     pub fn show_clean_progress(ui: &mut egui::Ui, data: &AppData) {
         if let Some((current, total, size_freed)) = data.clean_progress {
             ui.vertical(|ui| {
@@ -48,11 +48,18 @@ impl ProgressBar {
                         ui.label(purger_core::format_bytes(size_freed));
                     });
                 }
+
+                if !data.clean_errors.is_empty() {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(220, 80, 80),
+                        tr!("progress.failed_so_far", count = data.clean_errors.len()),
+                    );
+                }
             });
         }
     }
 
-    /// 显示所有进度信息
+    /// Show all progress information
     pub fn show_all_progress(ui: &mut egui::Ui, state: &AppState, data: &AppData) {
         match state {
             AppState::Scanning => {
@@ -81,6 +88,40 @@ impl ProgressBar {
                                     "progress.failed_projects",
                                     count = result.failed_projects.len()
                                 ));
+                            }
+
+                            if !data.clean_errors.is_empty() {
+                                ui.collapsing(
+                                    tr!("progress.failed_details", count = data.clean_errors.len()),
+                                    |ui| {
+                                        ui.horizontal(|ui| {
+                                            if ui.button(tr!("progress.copy_failed")).clicked() {
+                                                let text = data
+                                                    .clean_errors
+                                                    .iter()
+                                                    .map(|(name, error)| format!("{name}: {error}"))
+                                                    .collect::<Vec<_>>()
+                                                    .join("\n");
+                                                ui.ctx().copy_text(text);
+                                            }
+                                        });
+
+                                        egui::ScrollArea::vertical()
+                                            .max_height(180.0)
+                                            .auto_shrink([false; 2])
+                                            .show(ui, |ui| {
+                                                for (name, error) in &data.clean_errors {
+                                                    ui.horizontal_wrapped(|ui| {
+                                                        ui.colored_label(
+                                                            egui::Color32::from_rgb(220, 80, 80),
+                                                            name,
+                                                        );
+                                                        ui.label(error);
+                                                    });
+                                                }
+                                            });
+                                    },
+                                );
                             }
                         });
                     });
