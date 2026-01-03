@@ -179,6 +179,7 @@ impl ProjectScanner {
     /// 并行处理项目（带缓存优化）
     fn process_projects_parallel(&self, cargo_dirs: Vec<PathBuf>) -> Result<Vec<RustProject>> {
         let cache = Arc::clone(&self.cache);
+        let lazy_size_calculation = self.config.lazy_size_calculation;
 
         let projects: Vec<_> = cargo_dirs
             .into_par_iter()
@@ -192,7 +193,13 @@ impl ProjectScanner {
                 }
 
                 // 缓存未命中，解析项目
-                match RustProject::from_path(&dir) {
+                let project_result = if lazy_size_calculation {
+                    RustProject::from_path_lazy(&dir)
+                } else {
+                    RustProject::from_path(&dir)
+                };
+
+                match project_result {
                     Ok(project) => {
                         debug!("成功解析项目: {}", project.name);
 
@@ -219,7 +226,13 @@ impl ProjectScanner {
         let mut projects = Vec::new();
 
         for dir in cargo_dirs {
-            match RustProject::from_path(&dir) {
+            let project_result = if self.config.lazy_size_calculation {
+                RustProject::from_path_lazy(&dir)
+            } else {
+                RustProject::from_path(&dir)
+            };
+
+            match project_result {
                 Ok(project) => {
                     debug!("成功解析项目: {}", project.name);
                     projects.push(project);
@@ -242,7 +255,13 @@ impl ProjectScanner {
             anyhow::bail!("路径不是Rust项目: {:?}", project_path);
         }
 
-        RustProject::from_path(project_path).context("解析Rust项目失败")
+        let project_result = if self.config.lazy_size_calculation {
+            RustProject::from_path_lazy(project_path)
+        } else {
+            RustProject::from_path(project_path)
+        };
+
+        project_result.context("解析Rust项目失败")
     }
 
     /// 过滤有target目录的项目

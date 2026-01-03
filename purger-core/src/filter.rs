@@ -106,12 +106,13 @@ impl ProjectFilter {
     /// 检查大小过滤条件
     fn check_size_filter(&self, project: &RustProject) -> bool {
         if let Some(keep_size) = self.config.keep_size {
-            if project.target_size < keep_size {
+            let target_size = project.get_target_size();
+            if target_size < keep_size {
                 // target目录太小，保留
                 debug!(
                     "项目 {} target目录大小 {} 小于阈值 {}，保留",
                     project.name,
-                    crate::format_bytes(project.target_size),
+                    crate::format_bytes(target_size),
                     crate::format_bytes(keep_size)
                 );
                 return true;
@@ -120,7 +121,7 @@ impl ProjectFilter {
                 debug!(
                     "项目 {} target目录大小 {} 超过阈值 {}，可以清理",
                     project.name,
-                    crate::format_bytes(project.target_size),
+                    crate::format_bytes(target_size),
                     crate::format_bytes(keep_size)
                 );
                 return false;

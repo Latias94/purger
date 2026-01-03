@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::WalkDir;
 
-/// Rust项目信息
+/// Rust project metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RustProject {
     pub path: PathBuf,
@@ -17,8 +17,17 @@ pub struct RustProject {
 }
 
 impl RustProject {
-    /// 从路径创建RustProject实例
+    /// Create a `RustProject` from a directory path
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::from_path_impl(path, false)
+    }
+
+    /// Create a `RustProject` from a directory path, without computing target size
+    pub fn from_path_lazy<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::from_path_impl(path, true)
+    }
+
+    fn from_path_impl<P: AsRef<Path>>(path: P, lazy_size: bool) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let cargo_toml_path = path.join("Cargo.toml");
 
@@ -36,8 +45,12 @@ impl RustProject {
                 .context("Failed to get target directory metadata")?
                 .modified()
                 .context("Failed to get target directory modification time")?;
-            // 默认不计算大小，提升扫描速度
-            (0, modified)
+            let size = if lazy_size {
+                0
+            } else {
+                Self::calculate_directory_size_fast(&target_path).unwrap_or(0)
+            };
+            (size, modified)
         } else {
             (0, SystemTime::UNIX_EPOCH)
         };
@@ -52,7 +65,7 @@ impl RustProject {
         })
     }
 
-    /// 一次性解析 Cargo.toml，提取项目名称和workspace信息
+    /// Parse Cargo.toml once to extract package name and workspace info
     fn parse_cargo_toml(cargo_toml_path: &Path, project_path: &Path) -> Result<(String, bool)> {
         let content = fs::read_to_string(cargo_toml_path).context("Failed to read Cargo.toml")?;
         let parsed: toml::Value = toml::from_str(&content).context("Failed to parse Cargo.toml")?;
@@ -77,14 +90,14 @@ impl RustProject {
         Ok((name, is_workspace))
     }
 
-    /// 检查是否为workspace项目（保留向后兼容）
+    /// Check whether this is a workspace project (kept for backward compatibility)
     fn is_workspace_project(cargo_toml_path: &Path) -> Result<bool> {
         let content = fs::read_to_string(cargo_toml_path).context("Failed to read Cargo.toml")?;
         let parsed: toml::Value = toml::from_str(&content).context("Failed to parse Cargo.toml")?;
         Ok(parsed.get("workspace").is_some())
     }
 
-    /// 从Cargo.toml提取项目名称（保留向后兼容）
+    /// Extract project name from Cargo.toml (kept for backward compatibility)
     fn extract_project_name(cargo_toml_path: &Path) -> Option<String> {
         let content = fs::read_to_string(cargo_toml_path).ok()?;
         let parsed: toml::Value = toml::from_str(&content).ok()?;
@@ -96,7 +109,7 @@ impl RustProject {
             .map(|s| s.to_string())
     }
 
-    /// 计算目录大小
+    /// Calculate directory size
     fn calculate_directory_size(dir: &Path) -> Result<u64> {
         let mut total_size = 0u64;
 
@@ -111,7 +124,7 @@ impl RustProject {
         Ok(total_size)
     }
 
-    /// 快速计算目录大小（优化版本）
+    /// Calculate directory size (parallelized)
     fn calculate_directory_size_fast(dir: &Path) -> Result<u64> {
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -134,12 +147,12 @@ impl RustProject {
         Ok(total_size.into_inner())
     }
 
-    /// 获取格式化的大小字符串
+    /// Get a human-readable target size string
     pub fn formatted_size(&self) -> String {
         crate::format_bytes(self.get_target_size())
     }
 
-    /// 获取target目录大小（按需计算）
+    /// Get target directory size (compute on demand if needed)
     pub fn get_target_size(&self) -> u64 {
         if self.target_size > 0 {
             return self.target_size;
@@ -154,7 +167,7 @@ impl RustProject {
         Self::calculate_directory_size_fast(&target_path).unwrap_or(0)
     }
 
-    /// 获取相对于给定基础路径的相对路径
+    /// Get relative path from a base directory
     pub fn relative_path(&self, base: &Path) -> PathBuf {
         self.path
             .strip_prefix(base)
@@ -162,12 +175,12 @@ impl RustProject {
             .to_path_buf()
     }
 
-    /// 检查target目录是否存在
+    /// Check if target directory exists
     pub fn target_exists(&self) -> bool {
         self.path.join("target").exists()
     }
 
-    /// 获取target目录路径
+    /// Get target directory path
     pub fn target_path(&self) -> PathBuf {
         self.path.join("target")
     }
