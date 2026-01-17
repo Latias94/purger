@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use tracing::debug;
 use walkdir::WalkDir;
 
 /// Rust project metadata
@@ -36,7 +37,16 @@ impl RustProject {
         }
 
         // 一次性读取和解析 TOML，避免重复 IO
-        let (name, is_workspace) = Self::parse_cargo_toml(&cargo_toml_path, &path)?;
+        let (name, is_workspace) = match Self::parse_cargo_toml(&cargo_toml_path, &path) {
+            Ok(result) => result,
+            Err(err) => {
+                debug!(
+                    "Failed to parse Cargo.toml at {:?}: {}",
+                    cargo_toml_path, err
+                );
+                (Self::fallback_project_name(&path), false)
+            }
+        };
         let target_path = path.join("target");
         let has_target = target_path.exists();
 
@@ -76,18 +86,20 @@ impl RustProject {
             .and_then(|p| p.get("name"))
             .and_then(|n| n.as_str())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                project_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string()
-            });
+            .unwrap_or_else(|| Self::fallback_project_name(project_path));
 
         // 检查是否为workspace项目
         let is_workspace = parsed.get("workspace").is_some();
 
         Ok((name, is_workspace))
+    }
+
+    fn fallback_project_name(project_path: &Path) -> String {
+        project_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
     }
 
     /// Check whether this is a workspace project (kept for backward compatibility)

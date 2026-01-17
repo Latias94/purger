@@ -159,7 +159,9 @@ impl ProjectScanner {
             })
         });
 
-        let cargo_dirs = cargo_dirs.into_inner().unwrap();
+        let cargo_dirs = cargo_dirs
+            .into_inner()
+            .unwrap_or_else(|poison| poison.into_inner());
         Ok(cargo_dirs)
     }
 
@@ -571,10 +573,34 @@ edition = "2021"
         std::fs::write(project_path.join("Cargo.toml"), "invalid toml content [[[[")?;
 
         let scanner = ProjectScanner::default();
-        let result = scanner.scan_single(&project_path);
+        let project = scanner.scan_single(&project_path)?;
+        assert_eq!(project.name, "corrupted_project");
+        assert!(!project.is_workspace);
+        assert!(!project.has_target);
 
-        // 应该返回错误，因为Cargo.toml无法解析
-        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_includes_corrupted_manifest() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let root = temp_dir.path();
+
+        create_test_project(root, "good_project", true)?;
+
+        let corrupted_path = root.join("corrupted_project");
+        std::fs::create_dir_all(&corrupted_path)?;
+        std::fs::write(
+            corrupted_path.join("Cargo.toml"),
+            "invalid toml content [[[[",
+        )?;
+
+        let scanner = ProjectScanner::default();
+        let projects = scanner.scan(root)?;
+
+        assert_eq!(projects.len(), 2);
+        assert!(projects.iter().any(|p| p.name == "good_project"));
+        assert!(projects.iter().any(|p| p.name == "corrupted_project"));
 
         Ok(())
     }
