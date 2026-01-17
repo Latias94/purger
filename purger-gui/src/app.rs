@@ -113,8 +113,12 @@ impl PurgerApp {
                     self.data.current_cleaning_project = Some(project_name);
                 }
                 AppMessage::CleanProjectProgress(progress) => {
+                    let total = progress
+                        .total_files
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "?".to_string());
                     self.data.current_cleaning_project = Some(format!(
-                        "{} - {} ({}/{})",
+                        "{} - {} ({}/{total})",
                         progress.project_name,
                         match progress.phase {
                             CleanPhase::Starting => "开始",
@@ -124,7 +128,6 @@ impl PurgerApp {
                             CleanPhase::Complete => "完成",
                         },
                         progress.files_processed,
-                        progress.total_files.unwrap_or(0)
                     ));
                 }
                 AppMessage::CleanProjectComplete(project_name, _size_freed) => {

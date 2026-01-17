@@ -1,12 +1,18 @@
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tracing::{debug, error, info};
+use walkdir::WalkDir;
 
-use crate::CleanResult;
 use crate::project::RustProject;
+use crate::{CleanFailure, CleanResult};
 
 /// 清理策略
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
@@ -36,6 +42,23 @@ pub enum CleanPhase {
     Cleaning,
     Finalizing,
     Complete,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("clean cancelled")]
+pub struct CleanCancelled;
+
+#[derive(Debug, thiserror::Error)]
+#[error("clean timed out after {timeout:?}")]
+pub struct CleanTimedOut {
+    pub timeout: Duration,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("refusing to delete unsafe target directory: {path:?} ({reason})")]
+pub struct UnsafeTargetDirectory {
+    pub path: PathBuf,
+    pub reason: String,
 }
 
 /// 清理器配置
@@ -93,28 +116,65 @@ impl ProjectCleaner {
     where
         F: Fn(CleanProgress),
     {
+        self.clean_project_with_progress_and_cancel(project, None, progress_callback)
+    }
+
+    pub fn clean_project_with_progress_and_cancel<F>(
+        &self,
+        project: &RustProject,
+        cancel_flag: Option<&AtomicBool>,
+        progress_callback: F,
+    ) -> Result<u64>
+    where
+        F: Fn(CleanProgress),
+    {
+        match self.clean_project_with_progress_impl(project, cancel_flag, &progress_callback) {
+            Ok(bytes) => Ok(bytes),
+            Err(err) => {
+                if !err.is::<CleanCancelled>() {
+                    error!("清理项目失败 {}: {}", project.name, err);
+                }
+                Err(err)
+            }
+        }
+    }
+
+    fn clean_project_with_progress_impl<F>(
+        &self,
+        project: &RustProject,
+        cancel_flag: Option<&AtomicBool>,
+        progress_callback: &F,
+    ) -> Result<u64>
+    where
+        F: Fn(CleanProgress),
+    {
+        self.check_cancel(cancel_flag)?;
+
         if self.config.dry_run {
+            let size = if project.has_target {
+                project.get_target_size()
+            } else {
+                0
+            };
             info!(
                 "DRY RUN: 将清理项目 {} ({})",
                 project.name,
-                project.formatted_size()
+                crate::format_bytes(size)
             );
-            return Ok(project.target_size);
+            return Ok(size);
         }
 
-        if !project.has_target {
+        if !project.has_target && self.config.strategy == CleanStrategy::DirectDelete {
             debug!("项目 {} 没有target目录，跳过", project.name);
             return Ok(0);
         }
 
-        let size_before = project.target_size;
         info!(
             "开始清理项目: {} ({})",
             project.name,
             project.formatted_size()
         );
 
-        // 发送开始进度
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
             current_file: None,
@@ -123,33 +183,25 @@ impl ProjectCleaner {
             phase: CleanPhase::Starting,
         });
 
-        let result = match self.config.strategy {
+        let bytes_freed = match self.config.strategy {
             CleanStrategy::CargoClean => {
-                self.clean_with_cargo_progress(project, &progress_callback)
+                self.clean_with_cargo_progress(project, cancel_flag, progress_callback)?
             }
             CleanStrategy::DirectDelete => {
-                self.clean_with_delete_progress(project, &progress_callback)
+                self.clean_with_delete_progress(project, cancel_flag, progress_callback)?
             }
         };
 
-        match result {
-            Ok(_) => {
-                // 发送完成进度
-                progress_callback(CleanProgress {
-                    project_name: project.name.clone(),
-                    current_file: None,
-                    files_processed: 0,
-                    total_files: Some(0),
-                    phase: CleanPhase::Complete,
-                });
-                info!("成功清理项目: {}", project.name);
-                Ok(size_before)
-            }
-            Err(e) => {
-                error!("清理项目失败 {}: {}", project.name, e);
-                Err(e)
-            }
-        }
+        progress_callback(CleanProgress {
+            project_name: project.name.clone(),
+            current_file: None,
+            files_processed: 0,
+            total_files: None,
+            phase: CleanPhase::Complete,
+        });
+
+        info!("成功清理项目: {}", project.name);
+        Ok(bytes_freed)
     }
 
     /// 批量清理项目
@@ -183,141 +235,161 @@ impl ProjectCleaner {
         for project in projects {
             match self.clean_project(project) {
                 Ok(size_freed) => result.add_success(size_freed),
-                Err(_) => result.add_failure(project.path.to_string_lossy().to_string()),
+                Err(err) => result.add_failure_detail(CleanFailure {
+                    project_name: project.name.clone(),
+                    project_path: project.path.clone(),
+                    error: err.to_string(),
+                }),
             }
         }
     }
 
     /// 并行清理项目（注意：这里简化实现，实际可能需要更复杂的并行控制）
     fn clean_projects_parallel(&self, projects: &[RustProject], result: &mut CleanResult) {
-        // 由于需要修改result，这里暂时使用串行实现
-        // 在实际应用中，可以使用Arc<Mutex<CleanResult>>或其他并发原语
-        self.clean_projects_sequential(projects, result);
+        let (successes, total_freed, failures): (usize, u64, Vec<CleanFailure>) = projects
+            .par_iter()
+            .map(|project| match self.clean_project(project) {
+                Ok(size_freed) => Ok(size_freed),
+                Err(err) => Err(CleanFailure {
+                    project_name: project.name.clone(),
+                    project_path: project.path.clone(),
+                    error: err.to_string(),
+                }),
+            })
+            .fold(
+                || (0usize, 0u64, Vec::new()),
+                |mut acc, item| {
+                    match item {
+                        Ok(size_freed) => {
+                            acc.0 += 1;
+                            acc.1 += size_freed;
+                        }
+                        Err(failure) => {
+                            acc.2.push(failure);
+                        }
+                    }
+                    acc
+                },
+            )
+            .reduce(
+                || (0usize, 0u64, Vec::new()),
+                |mut a, b| {
+                    a.0 += b.0;
+                    a.1 += b.1;
+                    a.2.extend(b.2);
+                    a
+                },
+            );
+
+        result.cleaned_projects += successes;
+        result.total_size_freed += total_freed;
+        for failure in failures {
+            result.add_failure_detail(failure);
+        }
     }
 
     /// 使用cargo clean清理
     #[allow(dead_code)]
-    fn clean_with_cargo(&self, project: &RustProject) -> Result<()> {
-        self.clean_with_cargo_progress(project, &|_| {})
+    fn clean_with_cargo(&self, project: &RustProject) -> Result<u64> {
+        self.clean_with_cargo_progress(project, None, &|_| {})
     }
 
     /// 使用cargo clean清理（带进度回调）
     fn clean_with_cargo_progress<F>(
         &self,
         project: &RustProject,
+        cancel_flag: Option<&AtomicBool>,
         progress_callback: &F,
-    ) -> Result<()>
+    ) -> Result<u64>
     where
         F: Fn(CleanProgress),
     {
         debug!("使用cargo clean清理项目: {}", project.name);
 
-        // 首先运行 dry-run 来获取文件列表
+        self.check_cancel(cancel_flag)?;
+
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
-            current_file: None,
+            current_file: Some("cargo clean".to_string()),
             files_processed: 0,
             total_files: None,
             phase: CleanPhase::Analyzing,
         });
 
-        let file_list = self.get_cargo_clean_file_list(project)?;
-        let total_files = file_list.len();
+        let target_path = project.target_path();
+        let size_before = if target_path.exists() {
+            project.get_target_size()
+        } else {
+            0
+        };
 
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
-            current_file: None,
+            current_file: Some("cargo clean".to_string()),
             files_processed: 0,
-            total_files: Some(total_files),
+            total_files: None,
             phase: CleanPhase::Cleaning,
         });
 
-        // 执行实际的清理
         let mut cmd = Command::new("cargo");
-        cmd.arg("clean").current_dir(&project.path);
+        cmd.arg("clean")
+            .current_dir(&project.path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        // 模拟进度更新（因为cargo clean本身不提供实时进度）
-        let handle = std::thread::spawn(move || cmd.output());
-
-        // 在清理过程中模拟进度更新
-        let mut processed = 0;
-        while !handle.is_finished() {
-            if processed < total_files {
-                processed = (processed + total_files / 10).min(total_files);
+        let output = self.run_command_with_timeout_and_cancel(
+            cmd,
+            self.timeout(),
+            cancel_flag,
+            |elapsed| {
+                let ticks = (elapsed.as_millis() / 250) as usize;
                 progress_callback(CleanProgress {
                     project_name: project.name.clone(),
-                    current_file: file_list.get(processed.saturating_sub(1)).cloned(),
-                    files_processed: processed,
-                    total_files: Some(total_files),
+                    current_file: Some(format!("cargo clean ({:?})", elapsed)),
+                    files_processed: ticks,
+                    total_files: None,
                     phase: CleanPhase::Cleaning,
                 });
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-
-        let output = handle
-            .join()
-            .map_err(|_| anyhow::anyhow!("清理线程异常"))?
-            .context("执行cargo clean失败")?;
+            },
+        )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("cargo clean失败: {}", stderr);
+            anyhow::bail!("cargo clean失败: {}", stderr.trim());
         }
 
         // 最终进度更新
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
             current_file: None,
-            files_processed: total_files,
-            total_files: Some(total_files),
+            files_processed: 0,
+            total_files: None,
             phase: CleanPhase::Finalizing,
         });
 
-        Ok(())
-    }
+        let size_after = if target_path.exists() {
+            project.get_target_size()
+        } else {
+            0
+        };
 
-    /// 获取cargo clean将要删除的文件列表
-    fn get_cargo_clean_file_list(&self, project: &RustProject) -> Result<Vec<String>> {
-        let mut cmd = Command::new("cargo");
-        cmd.arg("clean").arg("--dry-run").current_dir(&project.path);
-
-        let output = cmd.output().context("执行cargo clean --dry-run失败")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("cargo clean --dry-run失败: {}", stderr);
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let files: Vec<String> = stdout
-            .lines()
-            .filter(|line| !line.trim().is_empty() && !line.contains("Summary"))
-            .map(|line| {
-                // 提取文件名部分
-                if let Some(file_name) = std::path::Path::new(line.trim()).file_name() {
-                    file_name.to_string_lossy().to_string()
-                } else {
-                    line.trim().to_string()
-                }
-            })
-            .collect();
-
-        Ok(files)
+        Ok(size_before.saturating_sub(size_after))
     }
 
     /// 直接删除target目录
     #[allow(dead_code)]
-    fn clean_with_delete(&self, project: &RustProject) -> Result<()> {
-        self.clean_with_delete_progress(project, &|_| {})
+    fn clean_with_delete(&self, project: &RustProject) -> Result<u64> {
+        self.clean_with_delete_progress(project, None, &|_| {})
     }
 
     /// 直接删除target目录（带进度回调）
     fn clean_with_delete_progress<F>(
         &self,
         project: &RustProject,
+        cancel_flag: Option<&AtomicBool>,
         progress_callback: &F,
-    ) -> Result<()>
+    ) -> Result<u64>
     where
         F: Fn(CleanProgress),
     {
@@ -325,8 +397,11 @@ impl ProjectCleaner {
 
         let target_path = project.target_path();
         if !target_path.exists() {
-            return Ok(());
+            return Ok(0);
         }
+
+        self.check_cancel(cancel_flag)?;
+        self.validate_safe_target_directory(project, &target_path)?;
 
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
@@ -338,36 +413,50 @@ impl ProjectCleaner {
 
         // 如果需要保留可执行文件，先备份
         if self.config.keep_executable {
-            self.backup_executables(project, progress_callback)?;
+            self.backup_executables(project, cancel_flag, progress_callback)?;
         }
-
-        // 计算文件数量（用于进度显示）
-        let file_count = self.count_files_in_dir(&target_path)?;
 
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
             current_file: Some("target".to_string()),
             files_processed: 0,
-            total_files: Some(file_count),
+            total_files: None,
             phase: CleanPhase::Cleaning,
         });
 
-        // 执行删除
-        std::fs::remove_dir_all(&target_path).context("删除target目录失败")?;
+        let timeout = self.timeout();
+        let bytes_freed = if cancel_flag.is_some() || self.config.keep_executable {
+            self.delete_directory_tree_with_progress(
+                project,
+                &target_path,
+                cancel_flag,
+                timeout,
+                progress_callback,
+            )?
+        } else {
+            let size_before = project.get_target_size();
+            std::fs::remove_dir_all(&target_path).context("删除target目录失败")?;
+            size_before
+        };
 
         progress_callback(CleanProgress {
             project_name: project.name.clone(),
             current_file: None,
-            files_processed: file_count,
-            total_files: Some(file_count),
+            files_processed: 0,
+            total_files: None,
             phase: CleanPhase::Finalizing,
         });
 
-        Ok(())
+        Ok(bytes_freed)
     }
 
     /// 备份可执行文件
-    fn backup_executables<F>(&self, project: &RustProject, progress_callback: &F) -> Result<()>
+    fn backup_executables<F>(
+        &self,
+        project: &RustProject,
+        cancel_flag: Option<&AtomicBool>,
+        progress_callback: &F,
+    ) -> Result<()>
     where
         F: Fn(CleanProgress),
     {
@@ -391,6 +480,7 @@ impl ProjectCleaner {
 
         // 备份每个可执行文件
         for (i, exe_path) in executables.iter().enumerate() {
+            self.check_cancel(cancel_flag)?;
             let file_name = exe_path
                 .file_name()
                 .ok_or_else(|| anyhow::anyhow!("无效的可执行文件路径"))?;
@@ -416,6 +506,238 @@ impl ProjectCleaner {
             backup_dir
         );
         Ok(())
+    }
+
+    fn timeout(&self) -> Option<Duration> {
+        if self.config.timeout_seconds == 0 {
+            return None;
+        }
+        Some(Duration::from_secs(self.config.timeout_seconds))
+    }
+
+    fn check_cancel(&self, cancel_flag: Option<&AtomicBool>) -> Result<()> {
+        if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            anyhow::bail!(CleanCancelled);
+        }
+        Ok(())
+    }
+
+    fn validate_safe_target_directory(
+        &self,
+        project: &RustProject,
+        target_path: &std::path::Path,
+    ) -> Result<()> {
+        let metadata = std::fs::symlink_metadata(target_path).context("读取 target 元数据失败")?;
+        if metadata.file_type().is_symlink() {
+            anyhow::bail!(UnsafeTargetDirectory {
+                path: target_path.to_path_buf(),
+                reason: "target is a symlink/reparse point".to_string(),
+            });
+        }
+
+        let canonical_target = target_path.canonicalize().ok();
+        let canonical_project = project.path.canonicalize().ok();
+
+        if let (Some(target), Some(root)) = (canonical_target, canonical_project) {
+            if !target.starts_with(&root) {
+                anyhow::bail!(UnsafeTargetDirectory {
+                    path: target_path.to_path_buf(),
+                    reason: format!("target escapes project root: {target:?}"),
+                });
+            }
+        } else if !target_path.starts_with(&project.path) {
+            anyhow::bail!(UnsafeTargetDirectory {
+                path: target_path.to_path_buf(),
+                reason: "target is not under project path".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn delete_directory_tree_with_progress<F>(
+        &self,
+        project: &RustProject,
+        target_path: &std::path::Path,
+        cancel_flag: Option<&AtomicBool>,
+        timeout: Option<Duration>,
+        progress_callback: &F,
+    ) -> Result<u64>
+    where
+        F: Fn(CleanProgress),
+    {
+        let start = Instant::now();
+        let mut last_report = Instant::now();
+        let mut processed = 0usize;
+        let mut bytes_freed = 0u64;
+        let mut directories: Vec<PathBuf> = Vec::new();
+
+        for entry in WalkDir::new(target_path).follow_links(false).min_depth(1) {
+            self.check_cancel(cancel_flag)?;
+            if let Some(timeout) = timeout {
+                if start.elapsed() > timeout {
+                    anyhow::bail!(CleanTimedOut { timeout });
+                }
+            }
+
+            let entry = entry.context("遍历 target 目录失败")?;
+            let path = entry.path().to_path_buf();
+
+            if entry.file_type().is_dir() {
+                directories.push(path);
+                continue;
+            }
+
+            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                bytes_freed = bytes_freed.saturating_add(metadata.len());
+            }
+
+            Self::remove_path_best_effort(&path).with_context(|| format!("删除失败: {path:?}"))?;
+            processed = processed.saturating_add(1);
+
+            if last_report.elapsed() >= Duration::from_millis(120) {
+                last_report = Instant::now();
+                progress_callback(CleanProgress {
+                    project_name: project.name.clone(),
+                    current_file: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .or_else(|| Some(path.display().to_string())),
+                    files_processed: processed,
+                    total_files: None,
+                    phase: CleanPhase::Cleaning,
+                });
+            }
+        }
+
+        directories.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+        for dir in directories {
+            self.check_cancel(cancel_flag)?;
+            if let Some(timeout) = timeout {
+                if start.elapsed() > timeout {
+                    anyhow::bail!(CleanTimedOut { timeout });
+                }
+            }
+            let _ = Self::remove_dir_best_effort(&dir);
+        }
+
+        self.check_cancel(cancel_flag)?;
+        if let Some(timeout) = timeout {
+            if start.elapsed() > timeout {
+                anyhow::bail!(CleanTimedOut { timeout });
+            }
+        }
+
+        Self::remove_dir_best_effort(target_path)
+            .with_context(|| format!("删除 target 根目录失败: {target_path:?}"))?;
+
+        Ok(bytes_freed)
+    }
+
+    fn run_command_with_timeout_and_cancel<T>(
+        &self,
+        mut cmd: Command,
+        timeout: Option<Duration>,
+        cancel_flag: Option<&AtomicBool>,
+        on_tick: T,
+    ) -> Result<std::process::Output>
+    where
+        T: Fn(Duration),
+    {
+        let mut child = cmd.spawn().context("启动命令失败")?;
+        let start = Instant::now();
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let mut stdout_handle = Some(std::thread::spawn(move || -> Vec<u8> {
+            let mut buf = Vec::new();
+            if let Some(mut out) = stdout {
+                let _ = out.read_to_end(&mut buf);
+            }
+            buf
+        }));
+
+        let mut stderr_handle = Some(std::thread::spawn(move || -> Vec<u8> {
+            let mut buf = Vec::new();
+            if let Some(mut err) = stderr {
+                let _ = err.read_to_end(&mut buf);
+            }
+            buf
+        }));
+
+        let status = loop {
+            if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_handle.take().and_then(|h| h.join().ok());
+                let _ = stderr_handle.take().and_then(|h| h.join().ok());
+                anyhow::bail!(CleanCancelled);
+            }
+
+            if let Some(timeout) = timeout {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_handle.take().and_then(|h| h.join().ok());
+                    let _ = stderr_handle.take().and_then(|h| h.join().ok());
+                    anyhow::bail!(CleanTimedOut { timeout });
+                }
+            }
+
+            if let Some(status) = child.try_wait().context("等待子进程失败")? {
+                break status;
+            }
+
+            on_tick(start.elapsed());
+            std::thread::sleep(Duration::from_millis(80));
+        };
+
+        let stdout = stdout_handle
+            .take()
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default();
+        let stderr = stderr_handle
+            .take()
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default();
+
+        Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+
+    fn remove_path_best_effort(path: &std::path::Path) -> std::io::Result<()> {
+        if std::fs::remove_file(path).is_ok() {
+            return Ok(());
+        }
+        if std::fs::remove_dir(path).is_ok() {
+            return Ok(());
+        }
+
+        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+            let mut perms = metadata.permissions();
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+
+        std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path))
+    }
+
+    fn remove_dir_best_effort(path: &std::path::Path) -> std::io::Result<()> {
+        if std::fs::remove_dir(path).is_ok() {
+            return Ok(());
+        }
+
+        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+            let mut perms = metadata.permissions();
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+
+        std::fs::remove_dir(path).or_else(|_| std::fs::remove_dir_all(path))
     }
 
     /// 查找target目录中的可执行文件
@@ -501,26 +823,17 @@ impl ProjectCleaner {
 
     /// 获取备份目录
     fn get_backup_directory(&self, project: &RustProject) -> Result<PathBuf> {
-        if let Some(ref backup_dir) = self.config.executable_backup_dir {
-            // 使用指定的备份目录
-            Ok(backup_dir.join(&project.name))
+        let base_dir = if let Some(ref backup_dir) = self.config.executable_backup_dir {
+            backup_dir.clone()
         } else {
-            // 在项目目录下创建executables文件夹
-            Ok(project.path.join("executables"))
-        }
-    }
+            project.path.join("executables")
+        };
 
-    /// 计算目录中的文件数量
-    fn count_files_in_dir(&self, dir: &std::path::Path) -> Result<usize> {
-        use walkdir::WalkDir;
+        let mut hasher = DefaultHasher::new();
+        project.path.to_string_lossy().hash(&mut hasher);
+        let id = hasher.finish();
 
-        let count = WalkDir::new(dir)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_file())
-            .count();
-
-        Ok(count)
+        Ok(base_dir.join(format!("{}-{:016x}", project.name, id)))
     }
 
     /// 预览清理操作（dry run）

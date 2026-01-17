@@ -450,7 +450,17 @@ fn display_clean_result(result: &purger_core::CleanResult) {
     println!("Projects cleaned: {}", result.cleaned_projects);
     println!("Size freed: {}", result.format_size());
 
-    if !result.failed_projects.is_empty() {
+    if !result.failures.is_empty() {
+        println!("\nFailed to clean {} projects:", result.failures.len());
+        for failure in &result.failures {
+            println!(
+                "  - {} ({}): {}",
+                failure.project_name,
+                failure.project_path.display(),
+                failure.error
+            );
+        }
+    } else if !result.failed_projects.is_empty() {
         println!(
             "\nFailed to clean {} projects:",
             result.failed_projects.len()

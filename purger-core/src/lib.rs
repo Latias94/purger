@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 pub mod cleaner;
 pub mod filter;
@@ -12,10 +13,19 @@ pub use scanner::ProjectScanner;
 
 /// 清理结果统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanFailure {
+    pub project_name: String,
+    pub project_path: PathBuf,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanResult {
     pub cleaned_projects: usize,
     pub total_size_freed: u64,
     pub failed_projects: Vec<String>,
+    #[serde(default)]
+    pub failures: Vec<CleanFailure>,
     pub duration_ms: u64,
 }
 
@@ -31,6 +41,7 @@ impl CleanResult {
             cleaned_projects: 0,
             total_size_freed: 0,
             failed_projects: Vec::new(),
+            failures: Vec::new(),
             duration_ms: 0,
         }
     }
@@ -42,6 +53,12 @@ impl CleanResult {
 
     pub fn add_failure(&mut self, project_path: String) {
         self.failed_projects.push(project_path);
+    }
+
+    pub fn add_failure_detail(&mut self, failure: CleanFailure) {
+        self.failed_projects
+            .push(failure.project_path.to_string_lossy().to_string());
+        self.failures.push(failure);
     }
 
     pub fn format_size(&self) -> String {

@@ -1,5 +1,8 @@
 use crate::state::AppMessage;
-use purger_core::{CleanResult, ProjectCleaner, RustProject, cleaner::CleanConfig};
+use purger_core::{
+    CleanFailure, CleanResult, ProjectCleaner, RustProject,
+    cleaner::{CleanCancelled, CleanConfig},
+};
 use std::sync::mpsc;
 use std::thread;
 
@@ -33,9 +36,13 @@ impl CleanHandler {
 
                 // 使用带进度回调的清理方法
                 let sender_clone = sender.clone();
-                match cleaner.clean_project_with_progress(project, |progress| {
-                    let _ = sender_clone.send(AppMessage::CleanProjectProgress(progress));
-                }) {
+                match cleaner.clean_project_with_progress_and_cancel(
+                    project,
+                    Some(stop_flag.as_ref()),
+                    |progress| {
+                        let _ = sender_clone.send(AppMessage::CleanProjectProgress(progress));
+                    },
+                ) {
                     Ok(size_freed) => {
                         total_freed += size_freed;
                         result.add_success(size_freed);
@@ -46,7 +53,16 @@ impl CleanHandler {
                         let _ = sender.send(AppMessage::CleanProgress(i + 1, total, total_freed));
                     }
                     Err(e) => {
-                        result.add_failure(project.name.clone());
+                        if e.is::<CleanCancelled>()
+                            || stop_flag.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            return;
+                        }
+                        result.add_failure_detail(CleanFailure {
+                            project_name: project.name.clone(),
+                            project_path: project.path.clone(),
+                            error: e.to_string(),
+                        });
                         let _ = sender.send(AppMessage::CleanProjectError(
                             project.name.clone(),
                             e.to_string(),
