@@ -51,24 +51,24 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.9"
-walkdir = "2.4"
+walkdir = "2.5"
 ignore = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4.0", features = ["derive"] }
-eframe = "0.32"
-egui = "0.32"
-egui_extras = "0.32"
-tokio = { version = "1.0", features = ["full"] }
-rayon = "1.8"
-tempfile = "3.8"
+clap = { version = "4.5", features = ["derive"] }
+eframe = "0.33"
+egui = "0.33"
+egui_extras = "0.33"
+tokio = { version = "1.49", features = ["full"] }
+rayon = "1.11"
+tempfile = "3.24"
 # GUI-specific dependencies
-rfd = "0.15"
+rfd = "0.17"
 dirs = "6.0"
 rust-i18n = "3.1"
 sys-locale = "0.3"
 # Development dependencies
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # The profile that 'cargo dist build' will build with
 [profile.dist]
