@@ -537,7 +537,7 @@ impl ProjectCleaner {
 
         #[cfg(not(windows))]
         {
-            warn!(
+            tracing::warn!(
                 "CmdRmdir backend requested on non-Windows, falling back to Native for project: {}",
                 project.name
             );
