@@ -5,18 +5,26 @@ use eframe::egui;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectSort {
     SizeDesc,
+    SizeAsc,
     ModifiedDesc,
+    ModifiedAsc,
     NameAsc,
+    NameDesc,
     PathAsc,
+    PathDesc,
 }
 
 impl ProjectSort {
     fn label_key(&self) -> &'static str {
         match self {
             ProjectSort::SizeDesc => "filters.sort.size_desc",
+            ProjectSort::SizeAsc => "filters.sort.size_asc",
             ProjectSort::ModifiedDesc => "filters.sort.modified_desc",
+            ProjectSort::ModifiedAsc => "filters.sort.modified_asc",
             ProjectSort::NameAsc => "filters.sort.name_asc",
+            ProjectSort::NameDesc => "filters.sort.name_desc",
             ProjectSort::PathAsc => "filters.sort.path_asc",
+            ProjectSort::PathDesc => "filters.sort.path_desc",
         }
     }
 }
@@ -31,16 +39,22 @@ impl FiltersPanel {
         search_query: &mut String,
         sort: &mut ProjectSort,
         show_selected_only: &mut bool,
+        show_workspace_only: &mut bool,
     ) {
         ui.strong(tr!("filters.title"));
         ui.separator();
 
-        ui.label(tr!("filters.search_label"));
-        ui.add(
-            egui::TextEdit::singleline(search_query)
-                .hint_text(tr!("filters.search_placeholder"))
-                .desired_width(f32::INFINITY),
-        );
+        ui.horizontal(|ui| {
+            ui.label(tr!("filters.search_label"));
+            ui.add(
+                egui::TextEdit::singleline(search_query)
+                    .hint_text(tr!("filters.search_placeholder"))
+                    .desired_width(f32::INFINITY),
+            );
+            if ui.button(tr!("filters.clear_search")).clicked() {
+                search_query.clear();
+            }
+        });
 
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -50,9 +64,13 @@ impl FiltersPanel {
                 .show_ui(ui, |ui| {
                     for option in [
                         ProjectSort::SizeDesc,
+                        ProjectSort::SizeAsc,
                         ProjectSort::ModifiedDesc,
+                        ProjectSort::ModifiedAsc,
                         ProjectSort::NameAsc,
+                        ProjectSort::NameDesc,
                         ProjectSort::PathAsc,
+                        ProjectSort::PathDesc,
                     ] {
                         ui.selectable_value(sort, option, tr!(option.label_key()));
                     }
@@ -62,10 +80,11 @@ impl FiltersPanel {
         ui.add_space(6.0);
         ui.checkbox(show_selected_only, tr!("filters.selected_only"));
         ui.checkbox(&mut settings.target_only, tr!("filters.target_only"));
+        ui.checkbox(show_workspace_only, tr!("filters.workspace_only"));
 
         ui.add_space(6.0);
-        ui.collapsing(tr!("filters.scan_filters"), |ui| {
-            ui.label(tr!("filters.scan_filters_hint"));
+        ui.collapsing(tr!("filters.advanced"), |ui| {
+            ui.label(tr!("filters.advanced_hint"));
             ui.add_space(4.0);
 
             // keep_days

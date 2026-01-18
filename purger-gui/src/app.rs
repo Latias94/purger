@@ -1,5 +1,5 @@
 use eframe::egui;
-use purger_core::{CleanPhase, cleaner::CleanConfig};
+use purger_core::{CleanPhase, RustProject, cleaner::CleanConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::SystemTime;
@@ -29,6 +29,7 @@ pub struct PurgerApp {
     search_query: String,
     sort: ProjectSort,
     show_selected_only: bool,
+    show_workspace_only: bool,
 
     // 应用状态和数据
     state: AppState,
@@ -74,6 +75,7 @@ impl PurgerApp {
             search_query: String::new(),
             sort: ProjectSort::ModifiedDesc,
             show_selected_only: false,
+            show_workspace_only: false,
 
             state: AppState::Idle,
             data: AppData::new(),
@@ -310,6 +312,9 @@ impl PurgerApp {
             if self.settings.target_only && !project.has_target {
                 return false;
             }
+            if self.show_workspace_only && !project.is_workspace {
+                return false;
+            }
             if let Some(size_mb) = self.settings.keep_size_mb {
                 if project.has_target {
                     let keep_bytes = (size_mb * 1_000_000.0) as u64;
@@ -341,12 +346,18 @@ impl PurgerApp {
             let pa = &self.data.projects[a];
             let pb = &self.data.projects[b];
             match self.sort {
-                ProjectSort::SizeDesc => pb.target_size.cmp(&pa.target_size),
+                ProjectSort::SizeDesc => compare_size_desc(pa, pb),
+                ProjectSort::SizeAsc => compare_size_asc(pa, pb),
                 ProjectSort::ModifiedDesc => {
                     system_time_key(pb.last_modified).cmp(&system_time_key(pa.last_modified))
                 }
+                ProjectSort::ModifiedAsc => {
+                    system_time_key(pa.last_modified).cmp(&system_time_key(pb.last_modified))
+                }
                 ProjectSort::NameAsc => pa.name.cmp(&pb.name),
+                ProjectSort::NameDesc => pb.name.cmp(&pa.name),
                 ProjectSort::PathAsc => pa.path.cmp(&pb.path),
+                ProjectSort::PathDesc => pb.path.cmp(&pa.path),
             }
         });
 
@@ -398,6 +409,7 @@ impl eframe::App for PurgerApp {
                     &mut self.search_query,
                     &mut self.sort,
                     &mut self.show_selected_only,
+                    &mut self.show_workspace_only,
                 );
             });
 
@@ -505,6 +517,43 @@ fn system_time_key(time: SystemTime) -> u64 {
     time.duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+fn compare_size_desc(a: &RustProject, b: &RustProject) -> std::cmp::Ordering {
+    compare_optional_desc(size_key(a), size_key(b))
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
+fn compare_size_asc(a: &RustProject, b: &RustProject) -> std::cmp::Ordering {
+    compare_optional_asc(size_key(a), size_key(b))
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
+fn size_key(project: &RustProject) -> Option<u64> {
+    if !project.has_target || project.target_size == 0 {
+        return None;
+    }
+    Some(project.target_size)
+}
+
+fn compare_optional_desc(a: Option<u64>, b: Option<u64>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => b.cmp(&a),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+fn compare_optional_asc(a: Option<u64>, b: Option<u64>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
 }
 
 fn apply_compact_style(ctx: &egui::Context) {
