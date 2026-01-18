@@ -15,9 +15,9 @@ description = "A tool for cleaning Rust project build directories"
 # Workspace root package. This now provides the single `purger` binary.
 
 [dependencies]
-purger-core = { version = "0.3.0", path = "purger-core" }
-purger-cli = { version = "0.3.0", path = "purger-cli" }
-purger-gui = { version = "0.3.0", path = "purger-gui" }
+purger-core = { version = "0.4.0", path = "purger-core" }
+purger-cli = { version = "0.4.0", path = "purger-cli" }
+purger-gui = { version = "0.4.0", path = "purger-gui" }
 anyhow.workspace = true
 
 [dev-dependencies]
@@ -32,7 +32,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Mingzhen Zhuang <superfrankie621@gmail.com>"]
 description = "A tool for cleaning Rust project build directories"
