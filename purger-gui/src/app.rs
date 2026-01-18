@@ -309,26 +309,27 @@ impl PurgerApp {
         indices.retain(|&i| {
             let project = &self.data.projects[i];
 
-            if self.settings.target_only && !project.has_target {
-                return false;
-            }
-            if self.show_workspace_only && !project.is_workspace {
-                return false;
-            }
-            if let Some(size_mb) = self.settings.keep_size_mb {
-                if project.has_target {
-                    let keep_bytes = (size_mb * 1_000_000.0) as u64;
-                    if project.target_size == 0 {
-                        return false;
-                    }
-                    if project.target_size > keep_bytes {
-                        return false;
+            if self.show_selected_only {
+                if !self.data.is_selected(project) {
+                    return false;
+                }
+            } else {
+                if self.settings.target_only && !project.has_target {
+                    return false;
+                }
+                if self.show_workspace_only && !project.is_workspace {
+                    return false;
+                }
+                if let Some(size_mb) = self.settings.keep_size_mb {
+                    if project.has_target && project.target_size != 0 {
+                        let keep_bytes = (size_mb * 1_000_000.0) as u64;
+                        if project.target_size > keep_bytes {
+                            return false;
+                        }
                     }
                 }
             }
-            if self.show_selected_only && !self.data.is_selected(project) {
-                return false;
-            }
+
             if query.is_empty() {
                 return true;
             }
@@ -431,7 +432,19 @@ impl eframe::App for PurgerApp {
         // 中间主列表
         let visible = self.visible_project_indices();
         egui::CentralPanel::default().show(ctx, |ui| {
-            ProjectList::show(ui, &mut self.data, &self.state, &visible);
+            let mut sort_changed = false;
+            ProjectList::show(
+                ui,
+                &mut self.data,
+                &self.state,
+                &visible,
+                &mut self.sort,
+                &mut sort_changed,
+                self.settings.keep_size_mb.is_some(),
+            );
+            if sort_changed {
+                ctx.request_repaint();
+            }
         });
 
         // 对话框

@@ -185,6 +185,8 @@ fn translate_chinese(key: &str) -> Option<String> {
         "projects.empty_message" => "点击扫描按钮开始查找Rust项目",
         "projects.no_match" => "没有符合当前筛选条件的项目",
         "projects.waiting_sizes" => "正在计算大小以应用筛选...",
+        "projects.size_filter_pending" => "大小筛选已启用：%{count} 个项目大小待计算",
+        "projects.size_unknown_disabled" => "大小计算中，暂无法选择（已启用大小筛选）",
         "projects.found_message" => "找到 %{count} 个Rust项目",
         "projects.showing_message" => "显示 %{visible}/%{total}",
         "projects.selected_message" => "已选中: %{count} 个项目",
@@ -317,6 +319,10 @@ fn translate_english(key: &str) -> Option<String> {
         "projects.empty_message" => "Click scan button to start finding Rust projects",
         "projects.no_match" => "No projects match the current filters",
         "projects.waiting_sizes" => "Calculating sizes to apply filters...",
+        "projects.size_filter_pending" => "Size filter enabled: %{count} pending size(s)",
+        "projects.size_unknown_disabled" => {
+            "Size pending; selection disabled (size filter enabled)"
+        }
         "projects.found_message" => "Found %{count} Rust projects",
         "projects.showing_message" => "Showing %{visible}/%{total}",
         "projects.selected_message" => "Selected: %{count} projects",

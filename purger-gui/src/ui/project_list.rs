@@ -1,3 +1,4 @@
+use super::ProjectSort;
 use crate::state::{AppData, AppState};
 use crate::tr;
 use eframe::egui;
@@ -8,7 +9,15 @@ use std::time::{Duration, SystemTime};
 pub struct ProjectList;
 
 impl ProjectList {
-    pub fn show(ui: &mut egui::Ui, data: &mut AppData, state: &AppState, visible: &[usize]) {
+    pub fn show(
+        ui: &mut egui::Ui,
+        data: &mut AppData,
+        state: &AppState,
+        visible: &[usize],
+        sort: &mut ProjectSort,
+        sort_changed: &mut bool,
+        keep_size_filter_enabled: bool,
+    ) {
         if data.projects.is_empty() {
             ui.label(tr!("projects.empty_message"));
             return;
@@ -25,6 +34,20 @@ impl ProjectList {
                 ));
             }
         });
+
+        if keep_size_filter_enabled {
+            let pending = visible
+                .iter()
+                .filter(|&&i| data.projects[i].has_target && data.projects[i].target_size == 0)
+                .count();
+            if pending > 0 {
+                ui.add_space(2.0);
+                ui.colored_label(
+                    egui::Color32::GRAY,
+                    tr!("projects.size_filter_pending", count = pending),
+                );
+            }
+        }
         ui.separator();
 
         if visible.is_empty() {
@@ -52,16 +75,37 @@ impl ProjectList {
                     ui.strong("");
                 });
                 header.col(|ui| {
-                    ui.strong(tr!("projects.column_name"));
+                    if header_sort_button(ui, tr!("projects.column_name"), SortColumn::Name, sort)
+                        .clicked()
+                    {
+                        *sort_changed = true;
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong(tr!("projects.column_size"));
+                    if header_sort_button(ui, tr!("projects.column_size"), SortColumn::Size, sort)
+                        .clicked()
+                    {
+                        *sort_changed = true;
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong(tr!("projects.column_modified"));
+                    if header_sort_button(
+                        ui,
+                        tr!("projects.column_modified"),
+                        SortColumn::Modified,
+                        sort,
+                    )
+                    .clicked()
+                    {
+                        *sort_changed = true;
+                    }
                 });
                 header.col(|ui| {
-                    ui.strong(tr!("projects.column_path"));
+                    if header_sort_button(ui, tr!("projects.column_path"), SortColumn::Path, sort)
+                        .clicked()
+                    {
+                        *sort_changed = true;
+                    }
                 });
                 header.col(|ui| {
                     ui.strong(tr!("projects.column_tags"));
@@ -74,12 +118,14 @@ impl ProjectList {
                     let project = &data.projects[index];
 
                     let cleanable = project.has_target;
+                    let selectable =
+                        cleanable && (!keep_size_filter_enabled || project.target_size != 0);
 
                     row.col(|ui| {
                         let mut selected =
                             cleanable && data.selected_projects.contains(&project.path);
                         let resp = ui.add_enabled(
-                            selection_enabled && cleanable,
+                            selection_enabled && selectable,
                             egui::Checkbox::new(&mut selected, ""),
                         );
                         if resp.changed() {
@@ -88,6 +134,9 @@ impl ProjectList {
                             } else {
                                 data.selected_projects.remove(&project.path);
                             }
+                        }
+                        if keep_size_filter_enabled && cleanable && project.target_size == 0 {
+                            resp.on_hover_text(tr!("projects.size_unknown_disabled"));
                         }
                     });
 
@@ -172,4 +221,54 @@ fn format_compact_relative_time(time: SystemTime, enabled: bool) -> String {
     }
 
     tr!("details.time_days", n = elapsed.as_secs() / (24 * 60 * 60))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortColumn {
+    Name,
+    Size,
+    Modified,
+    Path,
+}
+
+fn header_sort_button(
+    ui: &mut egui::Ui,
+    label: String,
+    column: SortColumn,
+    sort: &mut ProjectSort,
+) -> egui::Response {
+    let indicator = match (column, *sort) {
+        (SortColumn::Name, ProjectSort::NameAsc) => " ▲",
+        (SortColumn::Name, ProjectSort::NameDesc) => " ▼",
+        (SortColumn::Size, ProjectSort::SizeAsc) => " ▲",
+        (SortColumn::Size, ProjectSort::SizeDesc) => " ▼",
+        (SortColumn::Modified, ProjectSort::ModifiedAsc) => " ▲",
+        (SortColumn::Modified, ProjectSort::ModifiedDesc) => " ▼",
+        (SortColumn::Path, ProjectSort::PathAsc) => " ▲",
+        (SortColumn::Path, ProjectSort::PathDesc) => " ▼",
+        _ => "",
+    };
+
+    let response = ui.add(
+        egui::Button::new(egui::RichText::new(format!("{label}{indicator}")).strong()).frame(false),
+    );
+
+    if response.clicked() {
+        *sort = match (column, *sort) {
+            (SortColumn::Name, ProjectSort::NameAsc) => ProjectSort::NameDesc,
+            (SortColumn::Name, ProjectSort::NameDesc) => ProjectSort::NameAsc,
+            (SortColumn::Size, ProjectSort::SizeAsc) => ProjectSort::SizeDesc,
+            (SortColumn::Size, ProjectSort::SizeDesc) => ProjectSort::SizeAsc,
+            (SortColumn::Modified, ProjectSort::ModifiedAsc) => ProjectSort::ModifiedDesc,
+            (SortColumn::Modified, ProjectSort::ModifiedDesc) => ProjectSort::ModifiedAsc,
+            (SortColumn::Path, ProjectSort::PathAsc) => ProjectSort::PathDesc,
+            (SortColumn::Path, ProjectSort::PathDesc) => ProjectSort::PathAsc,
+            (SortColumn::Name, _) => ProjectSort::NameAsc,
+            (SortColumn::Size, _) => ProjectSort::SizeDesc,
+            (SortColumn::Modified, _) => ProjectSort::ModifiedDesc,
+            (SortColumn::Path, _) => ProjectSort::PathAsc,
+        };
+    }
+
+    response
 }
