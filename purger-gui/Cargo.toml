@@ -1,5 +1,6 @@
 [package]
 name = "purger-gui"
+autobins = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -12,9 +13,9 @@ keywords.workspace = true
 categories.workspace = true
 description = "GUI interface for Rust project cleaner"
 
-[[bin]]
-name = "purger-gui"
-path = "src/main.rs"
+[lib]
+name = "purger_gui"
+path = "src/lib.rs"
 
 [dependencies]
 purger-core = { version = "0.3.0", path = "../purger-core" }

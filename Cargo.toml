@@ -12,14 +12,13 @@ keywords.workspace = true
 categories.workspace = true
 description = "A tool for cleaning Rust project build directories"
 
-# 这个包作为工作空间根，不包含二进制文件
-# 二进制文件由各自的子包提供：
-# - purger-cli 提供 purger-cli 二进制文件
-# - purger-gui 提供 purger-gui 二进制文件
+# Workspace root package. This now provides the single `purger` binary.
 
 [dependencies]
-# Re-export core functionality
 purger-core = { version = "0.3.0", path = "purger-core" }
+purger-cli = { version = "0.3.0", path = "purger-cli" }
+purger-gui = { version = "0.3.0", path = "purger-gui" }
+anyhow.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

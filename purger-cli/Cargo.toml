@@ -1,5 +1,6 @@
 [package]
 name = "purger-cli"
+autobins = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -15,10 +16,6 @@ description = "Command-line interface for Rust project cleaner"
 [lib]
 name = "purger_cli"
 path = "src/lib.rs"
-
-[[bin]]
-name = "purger-cli"
-path = "src/main.rs"
 
 [dependencies]
 purger-core = { version = "0.3.0", path = "../purger-core" }
