@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-01-18
+
+### Fixed
+- Non-Windows build failure in `purger-core` due to missing `warn!` macro import
+
 ## [0.4.0] - 2026-01-18
 
 ### Added
@@ -54,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configuration**: Flexible configuration system
 - **Performance**: Parallel processing and optimized algorithms
 
-[Unreleased]: https://github.com/Latias94/purger/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Latias94/purger/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Latias94/purger/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Latias94/purger/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Latias94/purger/compare/v0.1.0...v0.3.0
 [0.1.0]: https://github.com/Latias94/purger/releases/tag/v0.1.0
