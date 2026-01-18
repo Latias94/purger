@@ -1,5 +1,6 @@
 [package]
 name = "purger"
+autobins = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -13,6 +14,10 @@ categories.workspace = true
 description = "A tool for cleaning Rust project build directories"
 
 # Workspace root package. This now provides the single `purger` binary.
+
+[[bin]]
+name = "purger"
+path = "purger/main.rs"
 
 [dependencies]
 purger-core = { version = "0.4.0", path = "purger-core" }
