@@ -21,6 +21,7 @@ purger-core = { version = "0.3.0", path = "../purger-core" }
 anyhow.workspace = true
 eframe.workspace = true
 egui.workspace = true
+egui_extras.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
@@ -30,6 +31,7 @@ rfd.workspace = true
 dirs.workspace = true
 rust-i18n.workspace = true
 sys-locale.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

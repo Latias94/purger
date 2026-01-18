@@ -22,6 +22,10 @@ pub struct AppSettings {
     // 可执行文件保留选项
     pub keep_executable: bool,
     pub executable_backup_dir: Option<String>,
+
+    // 清理选项
+    #[serde(default)]
+    pub clean_timeout_seconds: u64,
 }
 
 impl Default for AppSettings {
@@ -44,6 +48,8 @@ impl Default for AppSettings {
             // 可执行文件保留选项默认值
             keep_executable: false,
             executable_backup_dir: None,
+
+            clean_timeout_seconds: 0,
         }
     }
 }
@@ -135,6 +141,7 @@ mod tests {
 
         assert!(!settings.keep_executable);
         assert!(settings.executable_backup_dir.is_none());
+        assert_eq!(settings.clean_timeout_seconds, 0);
     }
 
     #[test]

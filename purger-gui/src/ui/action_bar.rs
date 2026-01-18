@@ -30,6 +30,9 @@ impl ActionBar {
                         "projects.cleanable_size",
                         size = purger_core::format_bytes(total_selected_size)
                     ));
+                } else if selected_count > 0 && data.size_progress.is_some() {
+                    ui.separator();
+                    ui.colored_label(egui::Color32::GRAY, tr!("actions.size_calculating"));
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

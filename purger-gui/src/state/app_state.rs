@@ -16,11 +16,13 @@ pub enum AppMessage {
     ScanProgress(usize, usize), // (current, total)
     ScanComplete(Vec<RustProject>),
     ScanError(String),
-    CleanProgress(usize, usize, u64), // (current, total, size_freed_so_far)
-    CleanProjectStart(String),        // project_name
+    SizeProgress(usize, usize),          // (current, total)
+    ProjectSizeUpdate(PathBuf, u64),     // (project_path, target_size)
+    CleanProgress(usize, usize, u64),    // (current, total, size_freed_so_far)
+    CleanProjectStart(String),           // project_name
     CleanProjectProgress(CleanProgress), // 详细的项目清理进度
-    CleanProjectComplete(String, u64), // (project_name, size_freed)
-    CleanProjectError(String, String), // (project_name, error)
+    CleanProjectComplete(String, u64),   // (project_name, size_freed)
+    CleanProjectError(String, String),   // (project_name, error)
     CleanComplete(CleanResult),
 }
 
@@ -34,6 +36,7 @@ pub struct AppData {
 
     // 进度状态
     pub scan_progress: Option<(usize, usize)>, // (current, total)
+    pub size_progress: Option<(usize, usize)>, // (current, total)
     pub clean_progress: Option<(usize, usize, u64)>, // (current, total, size_freed)
     pub current_cleaning_project: Option<String>, // 当前正在清理的项目名
     pub clean_errors: Vec<(String, String)>,
@@ -152,6 +155,7 @@ impl AppData {
     #[allow(dead_code)]
     pub fn reset_progress(&mut self) {
         self.scan_progress = None;
+        self.size_progress = None;
         self.clean_progress = None;
         self.current_cleaning_project = None;
     }
@@ -179,6 +183,7 @@ mod tests {
         assert!(data.projects.is_empty());
         assert!(data.selected_projects.is_empty());
         assert!(data.scan_progress.is_none());
+        assert!(data.size_progress.is_none());
         assert!(data.clean_progress.is_none());
         assert!(data.current_cleaning_project.is_none());
         assert!(data.clean_errors.is_empty());

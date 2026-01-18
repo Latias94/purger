@@ -82,7 +82,7 @@ impl Default for CleanConfig {
             strategy: CleanStrategy::CargoClean,
             dry_run: false,
             parallel: true,
-            timeout_seconds: 30,
+            timeout_seconds: 0,
 
             // 可执行文件保留选项默认值
             keep_executable: false,
@@ -975,7 +975,7 @@ edition = "2021"
         assert_eq!(config.strategy, CleanStrategy::CargoClean);
         assert!(!config.dry_run);
         assert!(config.parallel);
-        assert_eq!(config.timeout_seconds, 30);
+        assert_eq!(config.timeout_seconds, 0);
         assert!(!config.keep_executable);
         assert!(config.executable_backup_dir.is_none());
     }

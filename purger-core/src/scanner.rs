@@ -3,6 +3,7 @@ use ignore::{DirEntry, WalkBuilder};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
@@ -69,6 +70,15 @@ impl ProjectScanner {
 
     /// 扫描指定路径下的所有Rust项目
     pub fn scan<P: AsRef<Path>>(&self, root_path: P) -> Result<Vec<RustProject>> {
+        self.scan_with_cancel_and_progress(root_path, None, None)
+    }
+
+    pub fn scan_with_cancel_and_progress<P: AsRef<Path>>(
+        &self,
+        root_path: P,
+        cancel_flag: Option<&AtomicBool>,
+        on_cargo_toml_found: Option<&(dyn Fn(usize) + Sync)>,
+    ) -> Result<Vec<RustProject>> {
         let root_path = root_path.as_ref();
         let start_time = std::time::Instant::now();
         info!("开始扫描路径: {:?}", root_path);
@@ -82,13 +92,17 @@ impl ProjectScanner {
         }
 
         // 优化的文件遍历
-        let cargo_dirs = self.find_cargo_projects(root_path)?;
+        let cargo_dirs = self.find_cargo_projects(root_path, cancel_flag, on_cargo_toml_found)?;
         let find_time = start_time.elapsed();
         info!(
             "找到 {} 个Cargo.toml文件，耗时: {:?}",
             cargo_dirs.len(),
             find_time
         );
+
+        if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            anyhow::bail!("扫描已取消");
+        }
 
         // 并行或串行处理项目
         let parse_start = std::time::Instant::now();
@@ -113,7 +127,12 @@ impl ProjectScanner {
     }
 
     /// 优化的Cargo项目查找方法
-    fn find_cargo_projects(&self, root_path: &Path) -> Result<Vec<PathBuf>> {
+    fn find_cargo_projects(
+        &self,
+        root_path: &Path,
+        cancel_flag: Option<&AtomicBool>,
+        on_cargo_toml_found: Option<&(dyn Fn(usize) + Sync)>,
+    ) -> Result<Vec<PathBuf>> {
         let mut builder = WalkBuilder::new(root_path);
         builder
             .follow_links(self.config.follow_links)
@@ -139,13 +158,21 @@ impl ProjectScanner {
 
         let walker = builder.build_parallel();
         let cargo_dirs = std::sync::Mutex::new(Vec::new());
+        let found_count = AtomicUsize::new(0);
 
         walker.run(|| {
             let cargo_dirs = &cargo_dirs;
+            let found_count = &found_count;
             Box::new(move |entry| {
+                if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                    return ignore::WalkState::Quit;
+                }
+
                 match entry {
                     Ok(entry) => {
-                        if let Some(project_dir) = self.process_entry(entry) {
+                        if let Some(project_dir) =
+                            self.process_entry(entry, found_count, on_cargo_toml_found)
+                        {
                             if let Ok(mut dirs) = cargo_dirs.lock() {
                                 dirs.push(project_dir);
                             }
@@ -166,12 +193,23 @@ impl ProjectScanner {
     }
 
     /// 处理单个目录条目
-    fn process_entry(&self, entry: DirEntry) -> Option<PathBuf> {
+    fn process_entry(
+        &self,
+        entry: DirEntry,
+        found_count: &AtomicUsize,
+        on_cargo_toml_found: Option<&(dyn Fn(usize) + Sync)>,
+    ) -> Option<PathBuf> {
         let path = entry.path();
 
         // 检查是否为Cargo.toml文件
         if path.file_name()? == "Cargo.toml" && path.is_file() {
             debug!("发现Cargo.toml: {:?}", path);
+            let count = found_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % 50 == 0 {
+                if let Some(callback) = on_cargo_toml_found {
+                    callback(count);
+                }
+            }
             return path.parent().map(|p| p.to_path_buf());
         }
 

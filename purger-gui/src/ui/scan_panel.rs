@@ -11,6 +11,7 @@ impl ScanPanel {
         scan_path: &mut String,
         settings: &mut AppSettings,
         state: &AppState,
+        can_stop_extra: bool,
         on_select_folder: &mut bool,
         on_start_scan: &mut bool,
         on_stop: &mut bool,
@@ -72,7 +73,7 @@ impl ScanPanel {
                 *on_start_scan = true;
             }
 
-            let can_stop = *state != AppState::Idle;
+            let can_stop = *state != AppState::Idle || can_stop_extra;
             if ui
                 .add_enabled(can_stop, egui::Button::new(tr!("scan.stop_button")))
                 .clicked()
@@ -82,6 +83,8 @@ impl ScanPanel {
 
             if *state == AppState::Scanning {
                 ui.label(tr!("scan.scanning_status"));
+            } else if can_stop_extra {
+                ui.label(tr!("scan.sizing_status"));
             }
         });
     }

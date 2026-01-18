@@ -181,7 +181,7 @@ pub enum Commands {
         executable_backup_dir: Option<PathBuf>,
 
         /// Timeout for each project clean operation (seconds)
-        #[arg(long, default_value = "30")]
+        #[arg(long, default_value = "0")]
         timeout: u64,
     },
 }

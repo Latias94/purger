@@ -66,7 +66,11 @@ impl ProjectDetails {
         ui.horizontal(|ui| {
             ui.label(tr!("details.size_label"));
             if project.has_target {
-                ui.monospace(purger_core::format_bytes(project.target_size));
+                if project.target_size == 0 {
+                    ui.colored_label(egui::Color32::GRAY, "…");
+                } else {
+                    ui.monospace(purger_core::format_bytes(project.target_size));
+                }
             } else {
                 ui.colored_label(egui::Color32::GRAY, "-");
             }

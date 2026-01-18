@@ -11,12 +11,27 @@ impl ProgressBar {
         if let Some((current, total)) = data.scan_progress {
             ui.horizontal(|ui| {
                 ui.label(tr!("progress.scan_label"));
-                let progress = if total > 0 {
-                    current as f32 / total as f32
+                if total > 0 {
+                    let progress = current as f32 / total as f32;
+                    ui.add(egui::ProgressBar::new(progress).text(format!("{current}/{total}")));
                 } else {
-                    0.0
-                };
-                ui.add(egui::ProgressBar::new(progress).text(format!("{current}/{total}")));
+                    ui.spinner();
+                    ui.label(tr!("progress.scan_found", count = current));
+                }
+            });
+        }
+    }
+
+    pub fn show_size_progress(ui: &mut egui::Ui, data: &AppData) {
+        if let Some((current, total)) = data.size_progress {
+            ui.horizontal(|ui| {
+                ui.label(tr!("progress.size_label"));
+                if total > 0 {
+                    let progress = current as f32 / total as f32;
+                    ui.add(egui::ProgressBar::new(progress).text(format!("{current}/{total}")));
+                } else {
+                    ui.spinner();
+                }
             });
         }
     }
@@ -69,6 +84,7 @@ impl ProgressBar {
                 Self::show_clean_progress(ui, data);
             }
             AppState::Idle => {
+                Self::show_size_progress(ui, data);
                 // 显示最后的清理结果
                 if let Some(ref result) = data.last_clean_result {
                     ui.group(|ui| {

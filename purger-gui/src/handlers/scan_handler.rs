@@ -17,46 +17,45 @@ impl ScanHandler {
         stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) {
         thread::spawn(move || {
-            let mut config = ScanConfig {
+            let config = ScanConfig {
                 max_depth,
                 keep_days: settings.keep_days,
                 ignore_paths: settings.ignore_paths.iter().map(PathBuf::from).collect(),
+                lazy_size_calculation: true,
                 ..Default::default()
             };
 
-            // 转换MB为字节
-            if let Some(size_mb) = settings.keep_size_mb {
-                config.keep_size = Some((size_mb * 1_000_000.0) as u64);
-            }
+            // keep_size_mb 的筛选延后到 GUI 侧（先快扫、后补齐大小）
 
             let scanner = ProjectScanner::new(config);
+            let _ = sender.send(AppMessage::ScanProgress(0, 0));
 
-            match scanner.scan(&path) {
-                Ok(mut projects) => {
+            let progress_sender = sender.clone();
+            let on_found = move |found: usize| {
+                let _ = progress_sender.send(AppMessage::ScanProgress(found, 0));
+            };
+
+            match scanner.scan_with_cancel_and_progress(
+                &path,
+                Some(stop_flag.as_ref()),
+                Some(&on_found),
+            ) {
+                Ok(projects) => {
                     if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         return;
                     }
 
                     let total = projects.len();
-                    let _ = sender.send(AppMessage::ScanProgress(0, total));
-
-                    // 模拟处理进度（实际中可以在项目解析时报告进度）
-                    for (i, _) in projects.iter().enumerate() {
-                        if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                            return;
-                        }
-                        let _ = sender.send(AppMessage::ScanProgress(i + 1, total));
-                        // 小延迟以显示进度（实际使用中可以移除）
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-
-                    projects = ProjectScanner::sort_by_size(projects);
+                    let _ = sender.send(AppMessage::ScanProgress(total, total));
 
                     if !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         let _ = sender.send(AppMessage::ScanComplete(projects));
                     }
                 }
                 Err(e) => {
+                    if stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
                     if !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
                         let _ = sender.send(AppMessage::ScanError(e.to_string()));
                     }

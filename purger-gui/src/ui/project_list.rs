@@ -1,6 +1,7 @@
 use crate::state::{AppData, AppState};
 use crate::tr;
 use eframe::egui;
+use egui_extras::{Column, TableBuilder};
 use std::time::{Duration, SystemTime};
 
 /// Project list (table view)
@@ -26,97 +27,127 @@ impl ProjectList {
         });
         ui.separator();
 
+        if visible.is_empty() {
+            if data.size_progress.is_some() {
+                ui.label(tr!("projects.waiting_sizes"));
+            } else {
+                ui.label(tr!("projects.no_match"));
+            }
+            return;
+        }
+
         let selection_enabled = *state == AppState::Idle;
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                egui::Grid::new("projects_table")
-                    .striped(true)
-                    .min_col_width(12.0)
-                    .spacing([6.0, 2.0])
-                    .show(ui, |ui| {
-                        ui.strong("");
-                        ui.strong(tr!("projects.column_name"));
-                        ui.strong(tr!("projects.column_size"));
-                        ui.strong(tr!("projects.column_modified"));
-                        ui.strong(tr!("projects.column_path"));
-                        ui.strong(tr!("projects.column_tags"));
-                        ui.end_row();
+        TableBuilder::new(ui)
+            .striped(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::auto())
+            .column(Column::initial(160.0).resizable(true))
+            .column(Column::initial(90.0))
+            .column(Column::initial(80.0))
+            .column(Column::remainder().at_least(240.0))
+            .column(Column::initial(140.0))
+            .header(22.0, |mut header| {
+                header.col(|ui| {
+                    ui.strong("");
+                });
+                header.col(|ui| {
+                    ui.strong(tr!("projects.column_name"));
+                });
+                header.col(|ui| {
+                    ui.strong(tr!("projects.column_size"));
+                });
+                header.col(|ui| {
+                    ui.strong(tr!("projects.column_modified"));
+                });
+                header.col(|ui| {
+                    ui.strong(tr!("projects.column_path"));
+                });
+                header.col(|ui| {
+                    ui.strong(tr!("projects.column_tags"));
+                });
+            })
+            .body(|body| {
+                body.rows(20.0, visible.len(), |mut row| {
+                    let row_index = row.index();
+                    let index = visible[row_index];
+                    let project = &data.projects[index];
 
-                        for &index in visible {
-                            let (name, path, target_size, last_modified, is_workspace, cleanable) = {
-                                let project = &data.projects[index];
-                                (
-                                    project.name.clone(),
-                                    project.path.clone(),
-                                    project.target_size,
-                                    project.last_modified,
-                                    project.is_workspace,
-                                    project.has_target,
-                                )
-                            };
+                    let cleanable = project.has_target;
 
-                            let mut selected =
-                                cleanable && data.selected_projects.contains(&path);
-                            let checkbox = ui.add_enabled(
-                                selection_enabled && cleanable,
-                                egui::Checkbox::new(&mut selected, ""),
-                            );
-                            if checkbox.changed() {
-                                if selected {
-                                    data.selected_projects.insert(path.clone());
-                                } else {
-                                    data.selected_projects.remove(&path);
-                                }
-                            }
-
-                            let focused = data
-                                .focused_project
-                                .as_ref()
-                                .is_some_and(|p| p == &path);
-                            let name_resp = ui.selectable_label(focused, &name);
-                            if name_resp.clicked() {
-                                data.focused_project = Some(path.clone());
-                            }
-
-                            if cleanable {
-                                ui.monospace(purger_core::format_bytes(target_size));
+                    row.col(|ui| {
+                        let mut selected =
+                            cleanable && data.selected_projects.contains(&project.path);
+                        let resp = ui.add_enabled(
+                            selection_enabled && cleanable,
+                            egui::Checkbox::new(&mut selected, ""),
+                        );
+                        if resp.changed() {
+                            if selected {
+                                data.selected_projects.insert(project.path.clone());
                             } else {
-                                ui.colored_label(egui::Color32::GRAY, "-");
+                                data.selected_projects.remove(&project.path);
                             }
-
-                            ui.monospace(format_compact_relative_time(last_modified, cleanable));
-
-                            let path_text = path.display().to_string();
-                            let path_resp = ui.add(
-                                egui::Label::new(path_text.clone())
-                                    .truncate()
-                                    .sense(egui::Sense::click()),
-                            );
-                            if path_resp.clicked() {
-                                data.focused_project = Some(path.clone());
-                            }
-                            path_resp.on_hover_text(path_text);
-
-                            ui.horizontal(|ui| {
-                                if is_workspace {
-                                    ui.colored_label(
-                                        egui::Color32::BLUE,
-                                        tr!("projects.tag_workspace"),
-                                    );
-                                }
-                                if !cleanable {
-                                    ui.colored_label(
-                                        egui::Color32::GRAY,
-                                        tr!("projects.no_target"),
-                                    );
-                                }
-                            });
-
-                            ui.end_row();
                         }
                     });
+
+                    row.col(|ui| {
+                        let focused = data
+                            .focused_project
+                            .as_ref()
+                            .is_some_and(|p| p == &project.path);
+                        let resp = ui.selectable_label(focused, &project.name);
+                        if resp.clicked() {
+                            data.focused_project = Some(project.path.clone());
+                        }
+                    });
+
+                    row.col(|ui| {
+                        if cleanable {
+                            if project.target_size == 0 {
+                                ui.colored_label(egui::Color32::GRAY, "…");
+                            } else {
+                                ui.monospace(purger_core::format_bytes(project.target_size));
+                            }
+                        } else {
+                            ui.colored_label(egui::Color32::GRAY, "-");
+                        }
+                    });
+
+                    row.col(|ui| {
+                        ui.monospace(format_compact_relative_time(
+                            project.last_modified,
+                            cleanable,
+                        ));
+                    });
+
+                    row.col(|ui| {
+                        let path_text = project.path.display().to_string();
+                        let resp = ui.add(
+                            egui::Label::new(path_text.clone())
+                                .truncate()
+                                .sense(egui::Sense::click()),
+                        );
+                        if resp.clicked() {
+                            data.focused_project = Some(project.path.clone());
+                        }
+                        resp.on_hover_text(path_text);
+                    });
+
+                    row.col(|ui| {
+                        ui.horizontal(|ui| {
+                            if project.is_workspace {
+                                ui.colored_label(
+                                    egui::Color32::BLUE,
+                                    tr!("projects.tag_workspace"),
+                                );
+                            }
+                            if !cleanable {
+                                ui.colored_label(egui::Color32::GRAY, tr!("projects.no_target"));
+                            }
+                        });
+                    });
+                });
             });
     }
 }

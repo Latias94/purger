@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::SystemTime;
 
-use crate::handlers::{CleanHandler, ScanHandler};
+use crate::handlers::{CleanHandler, ScanHandler, SizeHandler};
 use crate::simple_i18n::{Language, detect_system_language, set_language};
 use crate::state::{AppData, AppMessage, AppSettings, AppState};
 use crate::tr;
@@ -17,6 +17,7 @@ use crate::ui::{
 pub struct PurgerApp {
     // 设置
     settings: AppSettings,
+    settings_draft: Option<AppSettings>,
 
     // UI状态
     scan_path: String,
@@ -36,7 +37,9 @@ pub struct PurgerApp {
     // 通信和控制
     receiver: mpsc::Receiver<AppMessage>,
     sender: mpsc::Sender<AppMessage>,
-    stop_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    scan_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    clean_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    size_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl PurgerApp {
@@ -62,13 +65,14 @@ impl PurgerApp {
 
         Self {
             settings,
+            settings_draft: None,
             scan_path,
             show_settings: false,
             show_about: false,
             show_clean_confirm: false,
 
             search_query: String::new(),
-            sort: ProjectSort::SizeDesc,
+            sort: ProjectSort::ModifiedDesc,
             show_selected_only: false,
 
             state: AppState::Idle,
@@ -76,7 +80,9 @@ impl PurgerApp {
 
             receiver,
             sender,
-            stop_requested: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            scan_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            clean_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            size_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -90,9 +96,9 @@ impl PurgerApp {
                 AppMessage::ScanComplete(projects) => {
                     self.state = AppState::Idle;
                     self.data.scan_progress = None;
+                    self.data.size_progress = None;
                     self.data.set_projects(projects);
-                    self.stop_requested
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    self.start_size_calculation();
 
                     // 保存扫描路径到设置
                     self.settings.last_scan_path = self.scan_path.clone();
@@ -102,9 +108,20 @@ impl PurgerApp {
                 AppMessage::ScanError(error) => {
                     self.state = AppState::Idle;
                     self.data.scan_progress = None;
+                    self.data.size_progress = None;
                     self.data.error_message = Some(format!("扫描失败: {error}"));
-                    self.stop_requested
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                AppMessage::SizeProgress(current, total) => {
+                    if total == 0 || current >= total {
+                        self.data.size_progress = None;
+                    } else {
+                        self.data.size_progress = Some((current, total));
+                    }
+                }
+                AppMessage::ProjectSizeUpdate(path, size) => {
+                    if let Some(project) = self.data.projects.iter_mut().find(|p| p.path == path) {
+                        project.target_size = size;
+                    }
                 }
                 AppMessage::CleanProgress(current, total, size_freed) => {
                     self.data.clean_progress = Some((current, total, size_freed));
@@ -146,12 +163,28 @@ impl PurgerApp {
                     self.data.current_cleaning_project = None;
                     self.data.last_clean_result = Some(result);
                     self.data.error_message = None;
-                    self.stop_requested
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
                     self.start_scan();
                 }
             }
         }
+    }
+
+    fn start_size_calculation(&mut self) {
+        self.size_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.size_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let projects: Vec<_> = self
+            .data
+            .projects
+            .iter()
+            .map(|p| (p.path.clone(), p.has_target))
+            .collect();
+        SizeHandler::start_size_calculation(
+            projects,
+            self.sender.clone(),
+            self.size_cancel.clone(),
+        );
     }
 
     /// Start scanning
@@ -166,15 +199,21 @@ impl PurgerApp {
         self.state = AppState::Scanning;
         self.data.error_message = None;
         self.data.scan_progress = Some((0, 0));
-        self.stop_requested
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.data.size_progress = None;
+
+        self.scan_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.scan_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.size_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.size_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         ScanHandler::start_scan(
             path,
             max_depth,
             self.settings.clone(),
             self.sender.clone(),
-            self.stop_requested.clone(),
+            self.scan_cancel.clone(),
         );
     }
 
@@ -195,12 +234,15 @@ impl PurgerApp {
         self.data.error_message = None;
         self.data.clean_errors.clear();
         self.data.clean_progress = Some((0, selected_projects.len(), 0));
-        self.stop_requested
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+
+        self.clean_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.clean_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let config = CleanConfig {
             strategy: self.settings.clean_strategy,
             keep_executable: self.settings.keep_executable,
+            timeout_seconds: self.settings.clean_timeout_seconds,
             executable_backup_dir: self
                 .settings
                 .executable_backup_dir
@@ -213,16 +255,31 @@ impl PurgerApp {
             selected_projects,
             config,
             self.sender.clone(),
-            self.stop_requested.clone(),
+            self.clean_cancel.clone(),
         );
     }
 
     /// Stop the current operation
     fn stop_operation(&mut self) {
-        self.stop_requested
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        match self.state {
+            AppState::Scanning => {
+                self.scan_cancel
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            AppState::Cleaning => {
+                self.clean_cancel
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            AppState::Idle => {
+                if self.data.size_progress.is_some() {
+                    self.size_cancel
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
         self.state = AppState::Idle;
         self.data.scan_progress = None;
+        self.data.size_progress = None;
         self.data.clean_progress = None;
         self.data.current_cleaning_project = None;
     }
@@ -252,6 +309,17 @@ impl PurgerApp {
 
             if self.settings.target_only && !project.has_target {
                 return false;
+            }
+            if let Some(size_mb) = self.settings.keep_size_mb {
+                if project.has_target {
+                    let keep_bytes = (size_mb * 1_000_000.0) as u64;
+                    if project.target_size == 0 {
+                        return false;
+                    }
+                    if project.target_size > keep_bytes {
+                        return false;
+                    }
+                }
             }
             if self.show_selected_only && !self.data.is_selected(project) {
                 return false;
@@ -306,11 +374,13 @@ impl eframe::App for PurgerApp {
 
         // 顶部扫描工具栏
         egui::TopBottomPanel::top("scan_toolbar").show(ctx, |ui| {
+            let can_stop_extra = self.data.size_progress.is_some();
             ScanPanel::show(
                 ui,
                 &mut self.scan_path,
                 &mut self.settings,
                 &self.state,
+                can_stop_extra,
                 &mut on_select_folder,
                 &mut on_start_scan,
                 &mut on_stop,
@@ -353,7 +423,12 @@ impl eframe::App for PurgerApp {
         });
 
         // 对话框
-        Dialogs::show_settings(ctx, &mut self.show_settings, &mut self.settings);
+        Dialogs::show_settings(
+            ctx,
+            &mut self.show_settings,
+            &mut self.settings,
+            &mut self.settings_draft,
+        );
         Dialogs::show_about(ctx, &mut self.show_about);
 
         if self.show_clean_confirm {
@@ -412,7 +487,13 @@ impl eframe::App for PurgerApp {
             self.start_clean();
         }
 
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        let has_background_work = self.state != AppState::Idle
+            || self.data.scan_progress.is_some()
+            || self.data.size_progress.is_some()
+            || self.data.clean_progress.is_some();
+        if has_background_work {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {

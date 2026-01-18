@@ -58,6 +58,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.0", features = ["derive"] }
 eframe = "0.32"
 egui = "0.32"
+egui_extras = "0.32"
 tokio = { version = "1.0", features = ["full"] }
 rayon = "1.8"
 tempfile = "3.8"
