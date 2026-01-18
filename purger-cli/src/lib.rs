@@ -4,8 +4,8 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use purger_core::{
-    CleanStrategy, ProjectCleaner, ProjectFilter, ProjectScanner, cleaner::CleanConfig,
-    scanner::ScanConfig,
+    CleanStrategy, DirectDeleteBackend, ProjectCleaner, ProjectFilter, ProjectScanner,
+    cleaner::CleanConfig, scanner::ScanConfig,
 };
 
 /// 扫描命令的参数配置
@@ -30,6 +30,7 @@ struct CleanCommandArgs {
     path: PathBuf,
     max_depth: Option<usize>,
     strategy: CleanStrategyArg,
+    direct_delete_backend: DirectDeleteBackendArg,
     dry_run: bool,
     keep_days: Option<u32>,
     keep_size: Option<String>,
@@ -136,6 +137,10 @@ pub enum Commands {
         #[arg(short = 'S', long, value_enum, default_value = "cargo-clean")]
         strategy: CleanStrategyArg,
 
+        /// Direct-delete backend (Windows turbo mode via cmd rmdir)
+        #[arg(long, value_enum, default_value = "native")]
+        direct_delete_backend: DirectDeleteBackendArg,
+
         /// Dry run - show what would be cleaned without actually cleaning
         #[arg(short = 'n', long)]
         dry_run: bool,
@@ -196,11 +201,30 @@ pub enum CleanStrategyArg {
     DirectDelete,
 }
 
+#[derive(Debug, Clone, ValueEnum)]
+pub enum DirectDeleteBackendArg {
+    /// Use Rust filesystem deletion (cross-platform)
+    #[value(name = "native")]
+    Native,
+    /// Use `cmd.exe /C rmdir /S /Q` on Windows (usually faster)
+    #[value(name = "cmd-rmdir")]
+    CmdRmdir,
+}
+
 impl From<CleanStrategyArg> for CleanStrategy {
     fn from(arg: CleanStrategyArg) -> Self {
         match arg {
             CleanStrategyArg::CargoClean => CleanStrategy::CargoClean,
             CleanStrategyArg::DirectDelete => CleanStrategy::DirectDelete,
+        }
+    }
+}
+
+impl From<DirectDeleteBackendArg> for DirectDeleteBackend {
+    fn from(arg: DirectDeleteBackendArg) -> Self {
+        match arg {
+            DirectDeleteBackendArg::Native => DirectDeleteBackend::Native,
+            DirectDeleteBackendArg::CmdRmdir => DirectDeleteBackend::CmdRmdir,
         }
     }
 }
@@ -251,6 +275,7 @@ pub fn run_cli() -> Result<()> {
             path,
             max_depth,
             strategy,
+            direct_delete_backend,
             dry_run,
             keep_days,
             keep_size,
@@ -267,6 +292,7 @@ pub fn run_cli() -> Result<()> {
             path,
             max_depth,
             strategy,
+            direct_delete_backend,
             dry_run,
             keep_days,
             keep_size,
@@ -364,6 +390,7 @@ fn handle_clean_command(args: CleanCommandArgs) -> Result<()> {
         dry_run: args.dry_run,
         parallel: !args.no_parallel,
         timeout_seconds: args.timeout,
+        direct_delete_backend: args.direct_delete_backend.into(),
         keep_executable: args.keep_executable,
         executable_backup_dir: args.executable_backup_dir,
     };

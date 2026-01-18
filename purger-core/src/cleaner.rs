@@ -24,6 +24,17 @@ pub enum CleanStrategy {
     DirectDelete,
 }
 
+/// Backend for `CleanStrategy::DirectDelete`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DirectDeleteBackend {
+    /// Use Rust filesystem deletion (cross-platform, detailed progress).
+    #[default]
+    Native,
+    /// Use `cmd.exe /C rmdir /S /Q` on Windows (usually faster, coarse progress).
+    CmdRmdir,
+}
+
 /// 清理进度信息
 #[derive(Debug, Clone)]
 pub struct CleanProgress {
@@ -68,6 +79,7 @@ pub struct CleanConfig {
     pub dry_run: bool,
     pub parallel: bool,
     pub timeout_seconds: u64,
+    pub direct_delete_backend: DirectDeleteBackend,
 
     // 可执行文件保留选项
     /// 是否保留可执行文件
@@ -83,6 +95,7 @@ impl Default for CleanConfig {
             dry_run: false,
             parallel: true,
             timeout_seconds: 0,
+            direct_delete_backend: DirectDeleteBackend::Native,
 
             // 可执行文件保留选项默认值
             keep_executable: false,
@@ -425,18 +438,29 @@ impl ProjectCleaner {
         });
 
         let timeout = self.timeout();
-        let bytes_freed = if cancel_flag.is_some() || self.config.keep_executable {
-            self.delete_directory_tree_with_progress(
+        let bytes_freed = match self.config.direct_delete_backend {
+            DirectDeleteBackend::Native => {
+                if cancel_flag.is_some() || self.config.keep_executable {
+                    self.delete_directory_tree_with_progress(
+                        project,
+                        &target_path,
+                        cancel_flag,
+                        timeout,
+                        progress_callback,
+                    )?
+                } else {
+                    let size_before = project.get_target_size();
+                    std::fs::remove_dir_all(&target_path).context("删除target目录失败")?;
+                    size_before
+                }
+            }
+            DirectDeleteBackend::CmdRmdir => self.clean_with_windows_rmdir(
                 project,
                 &target_path,
                 cancel_flag,
                 timeout,
                 progress_callback,
-            )?
-        } else {
-            let size_before = project.get_target_size();
-            std::fs::remove_dir_all(&target_path).context("删除target目录失败")?;
-            size_before
+            )?,
         };
 
         progress_callback(CleanProgress {
@@ -448,6 +472,89 @@ impl ProjectCleaner {
         });
 
         Ok(bytes_freed)
+    }
+
+    fn clean_with_windows_rmdir<F>(
+        &self,
+        project: &RustProject,
+        target_path: &std::path::Path,
+        cancel_flag: Option<&AtomicBool>,
+        timeout: Option<Duration>,
+        progress_callback: &F,
+    ) -> Result<u64>
+    where
+        F: Fn(CleanProgress),
+    {
+        #[cfg(windows)]
+        {
+            self.check_cancel(cancel_flag)?;
+            self.validate_safe_target_directory(project, target_path)?;
+
+            let size_before = project.get_target_size();
+            let target_str = target_path.display().to_string();
+            if target_str.contains('"') {
+                return self.delete_directory_tree_with_progress(
+                    project,
+                    target_path,
+                    cancel_flag,
+                    timeout,
+                    progress_callback,
+                );
+            }
+
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", &format!("rmdir /S /Q \"{target_str}\"")]);
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+            let output =
+                self.run_command_with_timeout_and_cancel(cmd, timeout, cancel_flag, |elapsed| {
+                    progress_callback(CleanProgress {
+                        project_name: project.name.clone(),
+                        current_file: Some(format!("target ({:.1}s)", elapsed.as_secs_f32())),
+                        files_processed: 0,
+                        total_files: None,
+                        phase: CleanPhase::Cleaning,
+                    });
+                })?;
+
+            if output.status.success() {
+                return Ok(size_before);
+            }
+
+            if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                anyhow::bail!(CleanCancelled);
+            }
+
+            // Fallback to native deletion for better diagnostics and permission handling.
+            self.delete_directory_tree_with_progress(
+                project,
+                target_path,
+                cancel_flag,
+                timeout,
+                progress_callback,
+            )
+        }
+
+        #[cfg(not(windows))]
+        {
+            warn!(
+                "CmdRmdir backend requested on non-Windows, falling back to Native for project: {}",
+                project.name
+            );
+            if cancel_flag.is_some() || self.config.keep_executable {
+                self.delete_directory_tree_with_progress(
+                    project,
+                    target_path,
+                    cancel_flag,
+                    timeout,
+                    progress_callback,
+                )
+            } else {
+                let size_before = project.get_target_size();
+                std::fs::remove_dir_all(target_path).context("删除target目录失败")?;
+                Ok(size_before)
+            }
+        }
     }
 
     /// 备份可执行文件

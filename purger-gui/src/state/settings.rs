@@ -1,5 +1,5 @@
 use crate::simple_i18n::Language;
-use purger_core::CleanStrategy;
+use purger_core::{CleanStrategy, DirectDeleteBackend};
 use serde::{Deserialize, Serialize};
 
 /// Application settings
@@ -26,6 +26,10 @@ pub struct AppSettings {
     // 清理选项
     #[serde(default)]
     pub clean_timeout_seconds: u64,
+
+    // Direct delete options
+    #[serde(default)]
+    pub direct_delete_backend: DirectDeleteBackend,
 }
 
 impl Default for AppSettings {
@@ -50,6 +54,7 @@ impl Default for AppSettings {
             executable_backup_dir: None,
 
             clean_timeout_seconds: 0,
+            direct_delete_backend: DirectDeleteBackend::Native,
         }
     }
 }
@@ -142,6 +147,7 @@ mod tests {
         assert!(!settings.keep_executable);
         assert!(settings.executable_backup_dir.is_none());
         assert_eq!(settings.clean_timeout_seconds, 0);
+        assert_eq!(settings.direct_delete_backend, DirectDeleteBackend::Native);
     }
 
     #[test]

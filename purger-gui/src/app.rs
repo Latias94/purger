@@ -245,6 +245,7 @@ impl PurgerApp {
             strategy: self.settings.clean_strategy,
             keep_executable: self.settings.keep_executable,
             timeout_seconds: self.settings.clean_timeout_seconds,
+            direct_delete_backend: self.settings.direct_delete_backend,
             executable_backup_dir: self
                 .settings
                 .executable_backup_dir

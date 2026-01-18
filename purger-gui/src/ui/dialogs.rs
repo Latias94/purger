@@ -87,6 +87,42 @@ impl Dialogs {
                         });
                 });
 
+                #[cfg(windows)]
+                {
+                    ui.horizontal(|ui| {
+                        ui.label(tr!("dialog.direct_delete_backend"));
+                        let enabled = draft_settings.clean_strategy
+                            == purger_core::CleanStrategy::DirectDelete;
+                        ui.add_enabled_ui(enabled, |ui| {
+                            egui::ComboBox::from_id_salt("direct_delete_backend")
+                                .selected_text(match draft_settings.direct_delete_backend {
+                                    purger_core::DirectDeleteBackend::Native => {
+                                        tr!("dialog.direct_delete_backend.native")
+                                    }
+                                    purger_core::DirectDeleteBackend::CmdRmdir => {
+                                        tr!("dialog.direct_delete_backend.cmd_rmdir")
+                                    }
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut draft_settings.direct_delete_backend,
+                                        purger_core::DirectDeleteBackend::Native,
+                                        tr!("dialog.direct_delete_backend.native"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut draft_settings.direct_delete_backend,
+                                        purger_core::DirectDeleteBackend::CmdRmdir,
+                                        tr!("dialog.direct_delete_backend.cmd_rmdir"),
+                                    );
+                                });
+                        });
+                    });
+                    ui.colored_label(
+                        egui::Color32::GRAY,
+                        tr!("dialog.direct_delete_backend_hint"),
+                    );
+                }
+
                 ui.horizontal(|ui| {
                     ui.label(tr!("dialog.clean_timeout"));
                     ui.add(

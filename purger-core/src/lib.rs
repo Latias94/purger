@@ -6,7 +6,7 @@ pub mod filter;
 pub mod project;
 pub mod scanner;
 
-pub use cleaner::{CleanPhase, CleanProgress, CleanStrategy, ProjectCleaner};
+pub use cleaner::{CleanPhase, CleanProgress, CleanStrategy, DirectDeleteBackend, ProjectCleaner};
 pub use filter::ProjectFilter;
 pub use project::RustProject;
 pub use scanner::ProjectScanner;

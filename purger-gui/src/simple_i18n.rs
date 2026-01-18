@@ -245,6 +245,12 @@ fn translate_chinese(key: &str) -> Option<String> {
         "dialog.max_recent_paths" => "最大最近路径数:",
         "dialog.auto_save_settings" => "自动保存设置",
         "dialog.clean_timeout" => "清理超时(秒, 0=禁用):",
+        "dialog.direct_delete_backend" => "直接删除后端:",
+        "dialog.direct_delete_backend.native" => "原生(Rust)",
+        "dialog.direct_delete_backend.cmd_rmdir" => "极速(cmd rmdir)",
+        "dialog.direct_delete_backend_hint" => {
+            "Windows 可选：极速模式通常更快，但进度更粗；失败时会自动回退。"
+        }
         "dialog.clear_recent_paths" => "清除最近路径",
         "dialog.reset_defaults" => "重置为默认",
         "dialog.ok" => "确定",
@@ -381,6 +387,12 @@ fn translate_english(key: &str) -> Option<String> {
         "dialog.max_recent_paths" => "Max Recent Paths:",
         "dialog.auto_save_settings" => "Auto Save Settings",
         "dialog.clean_timeout" => "Clean timeout (sec, 0=disabled):",
+        "dialog.direct_delete_backend" => "Direct delete backend:",
+        "dialog.direct_delete_backend.native" => "Native (Rust)",
+        "dialog.direct_delete_backend.cmd_rmdir" => "Turbo (cmd rmdir)",
+        "dialog.direct_delete_backend_hint" => {
+            "Windows only: Turbo is usually faster but has coarse progress; falls back on failure."
+        }
         "dialog.clear_recent_paths" => "Clear Recent Paths",
         "dialog.reset_defaults" => "Reset to Defaults",
         "dialog.ok" => "OK",
