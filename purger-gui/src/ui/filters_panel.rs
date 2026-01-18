@@ -46,12 +46,19 @@ impl FiltersPanel {
 
         ui.horizontal(|ui| {
             ui.label(tr!("filters.search_label"));
-            ui.add(
+            let button_width = ui.spacing().interact_size.x;
+            let text_width =
+                (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(0.0);
+            ui.add_sized(
+                [text_width, 0.0],
                 egui::TextEdit::singleline(search_query)
-                    .hint_text(tr!("filters.search_placeholder"))
-                    .desired_width(f32::INFINITY),
+                    .hint_text(tr!("filters.search_placeholder")),
             );
-            if ui.button(tr!("filters.clear_search")).clicked() {
+            let clear_clicked = ui
+                .add_sized([button_width, 0.0], egui::Button::new("×").small())
+                .on_hover_text(tr!("filters.clear_search"))
+                .clicked();
+            if clear_clicked {
                 search_query.clear();
             }
         });
@@ -134,7 +141,7 @@ impl FiltersPanel {
                     let mut backup_dir = settings.executable_backup_dir.clone().unwrap_or_default();
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut backup_dir)
-                            .desired_width(f32::INFINITY)
+                            .desired_width(ui.available_width())
                             .hint_text(tr!("filters.backup_dir_hint")),
                     );
                     if response.changed() {
@@ -150,7 +157,14 @@ impl FiltersPanel {
             ui.add_space(8.0);
             ui.label(tr!("filters.ignore_paths"));
             ui.horizontal(|ui| {
-                if ui.button(tr!("filters.ignore_add")).clicked() {
+                let clicked = ui
+                    .add_sized(
+                        [ui.spacing().interact_size.x, 0.0],
+                        egui::Button::new("+").small(),
+                    )
+                    .on_hover_text(tr!("filters.ignore_add"))
+                    .clicked();
+                if clicked {
                     settings.ignore_paths.push(String::new());
                 }
             });
@@ -158,8 +172,16 @@ impl FiltersPanel {
             let mut to_remove = None;
             for (i, ignore_path) in settings.ignore_paths.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(ignore_path).desired_width(f32::INFINITY));
-                    if ui.button(tr!("filters.ignore_remove")).clicked() {
+                    let button_width = ui.spacing().interact_size.x;
+                    let text_width =
+                        (ui.available_width() - button_width - ui.spacing().item_spacing.x)
+                            .max(0.0);
+                    ui.add_sized([text_width, 0.0], egui::TextEdit::singleline(ignore_path));
+                    let clicked = ui
+                        .add_sized([button_width, 0.0], egui::Button::new("×").small())
+                        .on_hover_text(tr!("filters.ignore_remove"))
+                        .clicked();
+                    if clicked {
                         to_remove = Some(i);
                     }
                 });
