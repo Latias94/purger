@@ -569,44 +569,131 @@ impl ProjectCleaner {
         let start = Instant::now();
         let mut last_report = Instant::now();
         let mut processed = 0usize;
-        let mut bytes_freed = 0u64;
         let mut directories: Vec<PathBuf> = Vec::new();
 
-        for entry in WalkDir::new(target_path).follow_links(false).min_depth(1) {
-            self.check_cancel(cancel_flag)?;
-            if let Some(timeout) = timeout {
-                if start.elapsed() > timeout {
-                    anyhow::bail!(CleanTimedOut { timeout });
+        let mut bytes_freed = if project.target_size > 0 {
+            project.target_size
+        } else {
+            0
+        };
+        let track_bytes = project.target_size == 0;
+
+        if self.config.parallel && cancel_flag.is_some() {
+            let mut files: Vec<PathBuf> = Vec::new();
+
+            for entry in WalkDir::new(target_path).follow_links(false).min_depth(1) {
+                self.check_cancel(cancel_flag)?;
+                if let Some(timeout) = timeout {
+                    if start.elapsed() > timeout {
+                        anyhow::bail!(CleanTimedOut { timeout });
+                    }
+                }
+
+                let entry = entry.context("遍历 target 目录失败")?;
+                let path = entry.path().to_path_buf();
+
+                if entry.file_type().is_dir() {
+                    directories.push(path);
+                } else {
+                    files.push(path);
                 }
             }
 
-            let entry = entry.context("遍历 target 目录失败")?;
-            let path = entry.path().to_path_buf();
+            let total_files = Some(files.len());
+            let chunk_size = 1024usize;
+            for chunk in files.chunks(chunk_size) {
+                self.check_cancel(cancel_flag)?;
+                if let Some(timeout) = timeout {
+                    if start.elapsed() > timeout {
+                        anyhow::bail!(CleanTimedOut { timeout });
+                    }
+                }
 
-            if entry.file_type().is_dir() {
-                directories.push(path);
-                continue;
+                let bytes_in_chunk: u64 = chunk
+                    .par_iter()
+                    .map(|path| -> Result<u64> {
+                        if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                            anyhow::bail!(CleanCancelled);
+                        }
+                        if let Some(timeout) = timeout {
+                            if start.elapsed() > timeout {
+                                anyhow::bail!(CleanTimedOut { timeout });
+                            }
+                        }
+
+                        let mut bytes = 0u64;
+                        if track_bytes {
+                            if let Ok(metadata) = std::fs::symlink_metadata(path) {
+                                bytes = metadata.len();
+                            }
+                        }
+
+                        Self::remove_path_best_effort(path)
+                            .with_context(|| format!("删除失败: {path:?}"))?;
+                        Ok(bytes)
+                    })
+                    .try_reduce(|| 0u64, |a, b| Ok(a.saturating_add(b)))?;
+
+                if track_bytes {
+                    bytes_freed = bytes_freed.saturating_add(bytes_in_chunk);
+                }
+                processed = processed.saturating_add(chunk.len());
+
+                if last_report.elapsed() >= Duration::from_millis(120) {
+                    last_report = Instant::now();
+                    let current_file = chunk
+                        .last()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().to_string());
+                    progress_callback(CleanProgress {
+                        project_name: project.name.clone(),
+                        current_file,
+                        files_processed: processed,
+                        total_files,
+                        phase: CleanPhase::Cleaning,
+                    });
+                }
             }
+        } else {
+            for entry in WalkDir::new(target_path).follow_links(false).min_depth(1) {
+                self.check_cancel(cancel_flag)?;
+                if let Some(timeout) = timeout {
+                    if start.elapsed() > timeout {
+                        anyhow::bail!(CleanTimedOut { timeout });
+                    }
+                }
 
-            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
-                bytes_freed = bytes_freed.saturating_add(metadata.len());
-            }
+                let entry = entry.context("遍历 target 目录失败")?;
+                let path = entry.path().to_path_buf();
 
-            Self::remove_path_best_effort(&path).with_context(|| format!("删除失败: {path:?}"))?;
-            processed = processed.saturating_add(1);
+                if entry.file_type().is_dir() {
+                    directories.push(path);
+                    continue;
+                }
 
-            if last_report.elapsed() >= Duration::from_millis(120) {
-                last_report = Instant::now();
-                progress_callback(CleanProgress {
-                    project_name: project.name.clone(),
-                    current_file: path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .or_else(|| Some(path.display().to_string())),
-                    files_processed: processed,
-                    total_files: None,
-                    phase: CleanPhase::Cleaning,
-                });
+                if track_bytes {
+                    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                        bytes_freed = bytes_freed.saturating_add(metadata.len());
+                    }
+                }
+
+                Self::remove_path_best_effort(&path)
+                    .with_context(|| format!("删除失败: {path:?}"))?;
+                processed = processed.saturating_add(1);
+
+                if last_report.elapsed() >= Duration::from_millis(120) {
+                    last_report = Instant::now();
+                    progress_callback(CleanProgress {
+                        project_name: project.name.clone(),
+                        current_file: path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .or_else(|| Some(path.display().to_string())),
+                        files_processed: processed,
+                        total_files: None,
+                        phase: CleanPhase::Cleaning,
+                    });
+                }
             }
         }
 
